@@ -28,7 +28,7 @@ from multiprocessing import Pool
 # it takes measured data 'in_data' of size N by P
 # it takes an FFT-compatible frequency axis of size P
 # it takes a list of spectral filters (which are themselves functions) of size N
-def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio):
+def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio, Ef_estimate):
     # since I'm doing multi-processing, I want to initialize the seed from /dev/urandom independently for each process
     prng = np.random.RandomState() 
 
@@ -172,8 +172,11 @@ def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio):
         fractional_error = 1e99 # just a big number
         while fractional_error > 1: 
             # create a new guess
-            E_guess_t_raw = 1.0 + 0.3*prng.randn(P) + 0.3j*prng.randn(P)
-            E_guess_f = np.fft.fft(E_guess_t_raw * guess_filter) * guess_filter
+            if(Ef_estimate is not None):
+                E_guess_f = Ef_estimate + 0.05*prng.randn(P) + 0.05j*prng.randn(P)
+            else:
+                E_guess_t_raw = 1.0 + 0.3*prng.randn(P) + 0.3j*prng.randn(P)
+                E_guess_f = np.fft.fft(E_guess_t_raw * guess_filter) * guess_filter
             x_guess = np.zeros( (2*P + 2) )
             x_guess[:P] = np.real(E_guess_f)
             x_guess[P:-2] = np.imag(E_guess_f)
@@ -202,7 +205,8 @@ def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio):
                     # result = scipy.optimize.minimize(final_objective, x_solved, method='Newton-CG', jac=final_gradient)
                     x_solved = result.x
             fractional_error = final_objective(x_solved) / chi2cutoff
-            # print( '    current fractional_error=' + str(fractional_error) )
+            print( '    current fractional_error=' + str(fractional_error) )
+            print( '      which is old-fractional = ' + str(final_objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )) )
         # done the current minimization; do another one
         best_errors[which_minimum] = fractional_error
         best_answers[which_minimum] = x_solved

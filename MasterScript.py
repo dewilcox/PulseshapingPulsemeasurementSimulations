@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # MasterScript.py
 # Daniel Wilcox
 # This Python script produces the figures for the "SPEAR comparison of S-N" paper
@@ -579,15 +580,28 @@ def analyze_SPEAR(SPEAR_data_tuple, SPEAR_filters_tuple):
     
     
     
-def analyze_general(data_tuple, filters_tuple, in_M1, in_M2):
+def analyze_general(data_tuple, filters_tuple, in_M1, in_M2, smart_start):
     # extract the various inputs
     SHG_resampled = data_tuple[0]
     f_resampled = data_tuple[1]
     noise_resampled = data_tuple[2]
     filters = filters_tuple[0]
     
+    # compute a good initial guess, if wanted
+    if(smart_start):
+        chosen_M1 = 5
+        chosen_M2 = 5
+        best_a, amplitude_basis_functions, best_b, phase_basis_functions = (
+            general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 500, None)
+            )
+        amp_estimate = np.dot(best_a, np.array([ amplitude_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
+        phi_estimate = np.dot(best_b, np.array([ phase_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
+        Ef_estimate = amp_estimate * np.exp(1j*phi_estimate)
+    else:
+        Ef_estimate = None
+    
     # compute the results
-    best_a, amplitude_basis_functions, best_b, phase_basis_functions = general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, in_M1, in_M2, noise_resampled)
+    best_a, amplitude_basis_functions, best_b, phase_basis_functions = general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, in_M1, in_M2, noise_resampled, 10, Ef_estimate)
     # M = len(basis_functions)
     
     # convert to frequency-domain, finely spaced
@@ -628,7 +642,7 @@ def analyze_general(data_tuple, filters_tuple, in_M1, in_M2):
     
     
     
-def analyze_general_Fourier(data_tuple, filters_tuple, error_ratio):
+def analyze_general_Fourier(data_tuple, filters_tuple, error_ratio, smart_start):
     # extract the various inputs
     SHG_resampled = data_tuple[0]
     f_resampled = data_tuple[1]
@@ -636,8 +650,21 @@ def analyze_general_Fourier(data_tuple, filters_tuple, error_ratio):
     noise_resampled = data_tuple[2]
     filters = filters_tuple[0]
     
+    # compute a good initial guess, if wanted
+    if(smart_start):
+        chosen_M1 = 5
+        chosen_M2 = 5
+        best_a, amplitude_basis_functions, best_b, phase_basis_functions = (
+            general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 500)
+            )
+        amp_estimate = np.dot(best_a, np.array([ amplitude_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
+        phi_estimate = np.dot(best_b, np.array([ phase_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
+        Ef_estimate = amp_estimate * np.exp(1j*phi_estimate)
+    else:
+        Ef_estimate = None
+    
     # compute the results
-    best_E = general_pulseshaping_analysis_Fourier.analyze(SHG_resampled, f_resampled, filters, noise_resampled, error_ratio)
+    best_E = general_pulseshaping_analysis_Fourier.analyze(SHG_resampled, f_resampled, filters, noise_resampled, error_ratio, Ef_estimate)
     
     # center best_E in the time-domain; this is multiplying by a complex exponential in the frequency domain
     t_resampled = np.fft.fftfreq(f_resampled.size, df_resampled)
@@ -726,7 +753,7 @@ def create_figure(f, group_delays, file_name):
     # plt.ylim(view_minimum, view_maximum) 
     plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
     plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-    plt.xlim(-1.5*cs.bandwidth_f+cs.central_f, 1.7*cs.bandwidth_f+cs.central_f)
+    plt.xlim(-1.1*cs.bandwidth_f+cs.central_f, 1.3*cs.bandwidth_f+cs.central_f)
     plt.xlabel('Frequency (PHz)', fontsize=my_font_size)
 
     # add the legend
@@ -786,7 +813,7 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
         plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
         if(np.mod(which_plot, 2) == 0):
             plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-        plt.xlim(-1.5*cs.bandwidth_f+cs.central_f, 1.7*cs.bandwidth_f+cs.central_f)
+        plt.xlim(-1.1*cs.bandwidth_f+cs.central_f, 1.3*cs.bandwidth_f+cs.central_f)
         if(which_plot >= 4):
             plt.xlabel('Frequency (PHz)', fontsize=my_font_size)
 
@@ -857,9 +884,9 @@ num_iterations = 12
 # all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
 # SPIDER_f = all_SPIDER_results[0][0]
 # SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
-# # print 'Creating the SPIDER figure...'
-# # # create the SPIDER figures
-# # create_figures(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
+# #print 'Creating the SPIDER figure...'
+# ## create the SPIDER figures
+# #create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
 
 
 # # now MIIPS
@@ -930,11 +957,11 @@ num_iterations = 12
 
 # FROG next
 FROG_filters = create_FROG_spectral_filters()
-num_FROG_shots = 20000
+num_FROG_shots = 5000
 def single_FROG_iteration(iteration_number):
     FROG_data = create_data(FROG_filters, num_FROG_shots)
-    FROG_results = analyze_general(FROG_data, FROG_filters, 20, 20)
-    # FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, 0.9)
+    FROG_results = analyze_general(FROG_data, FROG_filters, 10, 10, smart_start=True)
+    # FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, error_ratio=4.71, smart_start=True)
     print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
     return FROG_results
 # do many FROG iterations
@@ -960,7 +987,7 @@ create_figure(FROG_f, FROG_gd, 'FROG.pdf')
 # def single_ChirpScan_iteration(iteration_number):
     # ChirpScan_data = create_data(ChirpScan_filters, num_ChirpScan_shots)
     # # ChirpScan_results = analyze_general(ChirpScan_data, ChirpScan_filters, 30, 30)
-    # ChirpScan_results = analyze_general_Fourier(ChirpScan_data, ChirpScan_filters, 0.35)
+    # ChirpScan_results = analyze_general_Fourier(ChirpScan_data, ChirpScan_filters, error_ratio=0.35)
     # print 'finished #' + str(iteration_number) + ' of the ChirpScan simulations.'
     # return ChirpScan_results
 # # do many ChirpScan iterations
@@ -977,7 +1004,7 @@ create_figure(FROG_f, FROG_gd, 'FROG.pdf')
 # ChirpScan_gd = np.array([ all_ChirpScan_results[i][1] for i in range(num_iterations) ])
 # # print 'Creating the ChirpScan figure...'
 # # create the ChirpScan figure
-# create_figure(ChirpScan_f, ChirpScan_gd, 'ChirpScan.pdf')
+# #create_figure(ChirpScan_f, ChirpScan_gd, 'ChirpScan.pdf')
 
 
 # # direct-fitted MIIPS 

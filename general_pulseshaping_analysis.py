@@ -88,7 +88,7 @@ def basic_basis_function(x):
 # it takes measured data 'in_data' of size N by P
 # it takes an FFT-compatible frequency axis of size P
 # it takes a list of spectral filters (which are themselves functions) of size N
-def analyze(in_data, in_f, filters, in_M1, in_M2, in_noise_estimate):
+def analyze(in_data, in_f, filters, in_M1, in_M2, in_noise_estimate, in_num_evals, Ef_estimate):
     # since I'm doing multi-processing, I want to initialize the seed from /dev/urandom independently for each process
     prng = np.random.RandomState() 
 
@@ -495,59 +495,79 @@ def analyze(in_data, in_f, filters, in_M1, in_M2, in_noise_estimate):
     def hessian_approx(x):
         J = final_Jacobian(x)
         return 2*np.dot(J.T, J)
+    
+    # create an initial guess based on Ef_estimate
+    if(Ef_estimate is not None):
+        amplitude_estimate = np.abs(Ef_estimate)
+        a_estimate = np.linalg.lstsq(Be1.T, amplitude_estimate)[0]
+        phase_estimate = np.fft.ifftshift(np.unwrap(np.angle(np.fft.fftshift(Ef_estimate))))
+        b_estimate = np.linalg.lstsq(Be2.T, phase_estimate)[0]
 
     # do the minimization
-    fractional_error = 1e99 # just a big number
-    while fractional_error > 1e-4: # this depends on 'n'
-        # create a new guess
-        a_guess = 5*(1 + 0.2*prng.randn(in_M1))
-        b_guess = 200*prng.randn(in_M2)
-        b_guess[:] *= np.array([1/(i+1)**3 for i in range(in_M2)])
-        x_guess = np.zeros( (in_M1+in_M2+2,) )
-        x_guess[:in_M1] = a_guess
-        x_guess[in_M1:-2] = b_guess
-        x_guess[-2] = 1 # a measure of inverse width in fs^2
-        x_guess[-1] = 0 # a measure of center-shift in fs^-1
-        # a_guess = 1 + 0.2*prng.randn(M) + 0.2j*prng.randn(M)
-        # # convert the guess to real form
-        # a_guess_realform = np.zeros(2*M)
-        # a_guess_realform[:M] = np.real(a_guess)
-        # a_guess_realform[M:] = np.imag(a_guess)
-        # do the minimization
-        # result = scipy.optimize.minimize(objective, x_guess, method='L-BFGS-B', jac=gradient, options={'maxiter': in_M1+in_M2})
-        # result = scipy.optimize.minimize(objective, x_guess, method='BFGS', jac=gradient)
-        # result = scipy.optimize.minimize(objective, x_guess, method='Newton-CG', jac=gradient, hess=hessian_approx, options={'maxiter': in_M1+in_M2})
-        # result = scipy.optimize.minimize(objective, x_guess, method='Newton-CG', jac=gradient, hessp=hessian_p, options={'maxiter': in_M1+in_M2})
-        # partial_fractional_error = objective(result.x) / np.sum( in_data**2 )
-        # if(partial_fractional_error < 2e-4):
-            # result = scipy.optimize.minimize(objective, result.x, method='Newton-CG', jac=gradient, hessp=hessian_p, options={'maxiter': 3*(in_M1+in_M2)})
-        # result = scipy.optimize.minimize(objective, x_guess, method='trust-ncg', jac=gradient, hessp=hessian_p, options={'maxiter': in_M1+in_M2})
-        # x_solved = result.x
-        # result = scipy.optimize.minimize(objective, x_guess, method='trust-ncg', jac=gradient, hess=hessian_approx)
-        # nfev1 = result[2]['nfev']
-        # nfev2 = 0
-        result = scipy.optimize.leastsq(final_residual, x_guess, Dfun=final_Jacobian, full_output=True, maxfev=(in_M1+in_M2), ftol=1e-5)
-        x_solved = result[0]
-        # nfev1 = result[2]['nfev']
-        partial_fractional_error = objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )
-        if(partial_fractional_error < 2e-3):
-            # # print('Allowing further optimization; nfev so far is ' + str(nfev1))
-            result = scipy.optimize.leastsq(final_residual, x_solved, Dfun=final_Jacobian, full_output=True, maxfev=3*(in_M1+in_M2), ftol=1e-5)
+    if(in_num_evals == 0):
+        fractional_error = 1e99 # just a big number
+        while fractional_error > 1e-4: # this depends on 'n'
+            # create a new guess
+            if(Ef_estimate is None):
+                a_guess = 5*(1 + 0.2*prng.randn(in_M1))
+                b_guess = 200*prng.randn(in_M2)
+                b_guess[:] *= np.array([1/(i+1)**3 for i in range(in_M2)])
+            else:
+                a_guess = a_estimate * np.exp(0.01*prng.randn(in_M1))
+                b_guess = b_estimate * np.exp(0.01*prng.randn(in_M2))
+            x_guess = np.zeros( (in_M1+in_M2+2,) )
+            x_guess[:in_M1] = a_guess
+            x_guess[in_M1:-2] = b_guess
+            x_guess[-2] = 1 # a measure of inverse width in fs^2
+            x_guess[-1] = 0 # a measure of center-shift in fs^-1
+
+            result = scipy.optimize.leastsq(final_residual, x_guess, Dfun=final_Jacobian, full_output=True, maxfev=(in_M1+in_M2), ftol=1e-5)
             x_solved = result[0]
+            # nfev1 = result[2]['nfev']
             partial_fractional_error = objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )
-            if (partial_fractional_error < 2e-4):
-                result = scipy.optimize.leastsq(final_residual, x_solved, Dfun=final_Jacobian, full_output=True, maxfev=10*(in_M1+in_M2), ftol=1e-9)
+            if(partial_fractional_error < 2e-3):
+                # # print('Allowing further optimization; nfev so far is ' + str(nfev1))
+                result = scipy.optimize.leastsq(final_residual, x_solved, Dfun=final_Jacobian, full_output=True, maxfev=3*(in_M1+in_M2), ftol=1e-5)
                 x_solved = result[0]
-            # nfev2 = result[2]['nfev']
-            # result = scipy.optimize.minimize(objective, result[0], method='Newton-CG', jac=gradient, hessp=hessian_p, options={'maxiter': 3*(in_M1+in_M2)})
-            # x_solved = result.x
-        # else:
-            # # print('Stopping further optimization')
-            # nfev2 = 0
+                partial_fractional_error = objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )
+                if (partial_fractional_error < 2e-4):
+                    result = scipy.optimize.leastsq(final_residual, x_solved, Dfun=final_Jacobian, full_output=True, maxfev=10*(in_M1+in_M2), ftol=1e-9)
+                    x_solved = result[0]
+            fractional_error = objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )
+            # fractional_error = objective(result[0]) / np.sum( in_data**2 )
+            print( '   current fractional_error=' + str(fractional_error) )
+            # print( 'nfev = ' + str(nfev1 + nfev2) )
+    else:
+        solved_xs = np.zeros( (in_M1+in_M2+2, in_num_evals) )
+        objectives = np.zeros( (in_num_evals,) )
+        for which_opt in range(in_num_evals):
+            # create a new guess
+            # create a new guess
+            if(Ef_estimate is None):
+                a_guess = 5*(1 + 0.2*prng.randn(in_M1))
+                b_guess = 200*prng.randn(in_M2)
+                b_guess[:] *= np.array([1/(i+1)**3 for i in range(in_M2)])
+            else:
+                a_guess = a_estimate * np.exp(0.01*prng.randn(in_M1))
+                b_guess = b_estimate * np.exp(0.01*prng.randn(in_M2))
+            x_guess = np.zeros( (in_M1+in_M2+2,) )
+            x_guess[:in_M1] = a_guess
+            x_guess[in_M1:-2] = b_guess
+            x_guess[-2] = 1 # a measure of inverse width in fs^2
+            x_guess[-1] = 0 # a measure of center-shift in fs^-1
+
+            result = scipy.optimize.leastsq(final_residual, x_guess, Dfun=final_Jacobian, full_output=True, maxfev=2*(in_M1+in_M2), ftol=1e-5)
+            solved_xs[:, which_opt] = result[0]
+            objectives[which_opt] = objective(solved_xs[:, which_opt]) / np.sum( (in_data/in_noise_estimate)**2 )
+            #print( '   current fractional_error=' + str(objectives[which_opt]) )
+        # which optimization was best?
+        fractional_error = np.amin(objectives)
+        x_solved = solved_xs[:, np.argmin(objectives)]
+        # polish it a bit
+        result_polish = scipy.optimize.leastsq(final_residual, x_solved, Dfun=final_Jacobian, full_output=True, maxfev=10*(in_M1+in_M2), ftol=1e-9)
+        #result_polish = scipy.optimize.minimize(objective, x_solved, jac=gradient, method='L-BFGS-B', options={'maxcor': in_M1+in_M2+2})
+        x_solved = result_polish[0] #.x
         fractional_error = objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )
-        # fractional_error = objective(result[0]) / np.sum( in_data**2 )
-        # print( '   current fractional_error=' + str(fractional_error) )
-        # print( 'nfev = ' + str(nfev1 + nfev2) )
   
     # # check the output
     # plt.figure()

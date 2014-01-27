@@ -83,7 +83,7 @@ spectral_combos = (
     )
     
 # decide what the combination of spectral intensity and group-delay is
-pulse_combination_number = 3
+pulse_combination_number = 2
 spectral_gd = spectral_combos[pulse_combination_number][0]
 spectral_intensity = spectral_combos[pulse_combination_number][1]
 spectral_phase = spectral_combos[pulse_combination_number][2]
