@@ -28,7 +28,7 @@ from multiprocessing import Pool
 # it takes measured data 'in_data' of size N by P
 # it takes an FFT-compatible frequency axis of size P
 # it takes a list of spectral filters (which are themselves functions) of size N
-def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio, Ef_estimate):
+def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estimate):
     # since I'm doing multi-processing, I want to initialize the seed from /dev/urandom independently for each process
     prng = np.random.RandomState() 
 
@@ -160,23 +160,19 @@ def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio, Ef_estimate)
     # create a guessing filter
     guess_filter = np.exp( -20 * df**2 * t**2 )
     
-    # compute the chi2 cutoff; since we're doing direct fitting and since the input
-    # is a smoothed spline we expect this cutoff to be rather less than the regular chi-2 cutoff
-    chi2cutoff = error_ratio*N*P
+    # # compute the chi2 cutoff; since we're doing direct fitting and since the input
+    # # is a smoothed spline we expect this cutoff to be rather less than the regular chi-2 cutoff
+    # chi2cutoff = error_ratio*N*P
     
-    # do the minimization
-    num_minima = 5
-    best_errors = [0]*num_minima
-    best_answers = [0]*num_minima
-    for which_minimum in range(num_minima):
-        fractional_error = 1e99 # just a big number
-        while fractional_error > 1: 
-            # create a new guess
-            if(Ef_estimate is not None):
-                E_guess_f = Ef_estimate + 0.05*prng.randn(P) + 0.05j*prng.randn(P)
-            else:
-                E_guess_t_raw = 1.0 + 0.3*prng.randn(P) + 0.3j*prng.randn(P)
-                E_guess_f = np.fft.fft(E_guess_t_raw * guess_filter) * guess_filter
+    # create a starting guess; sample a few places
+    if(Ef_estimate is None):
+        n_samples = 200
+        x_samples = np.zeros( (2*P+2, n_samples) )
+        y_samples = np.zeros( (n_samples,) )
+        for i in range(n_samples):
+            print('trying guess #' + str(i))
+            E_guess_t_raw = 1.0 + 0.5*prng.randn(P) + 0.5j*prng.randn(P)
+            E_guess_f = np.fft.fft(E_guess_t_raw * guess_filter) * guess_filter
             x_guess = np.zeros( (2*P + 2) )
             x_guess[:P] = np.real(E_guess_f)
             x_guess[P:-2] = np.imag(E_guess_f)
@@ -190,26 +186,113 @@ def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio, Ef_estimate)
             best_scale_result = scipy.optimize.minimize_scalar(scaling_objective, bracket=(0.001, 1000))
             x_guess[:(2*P)] *= best_scale_result.x
             # print(' best scale is ' + str(best_scale_result.x))
-            # do the minimization
-            # result = scipy.optimize.minimize(final_objective, x_guess, method='BFGS', jac=final_gradient, options={'maxiter': P})
-            result = scipy.optimize.minimize(final_objective, x_guess, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 2*P, 'maxcor': 50})
-            x_solved = result.x
-            partial_fractional_error = final_objective(x_solved) / chi2cutoff
-            if(partial_fractional_error < 10):
-                result = scipy.optimize.minimize(final_objective, x_solved, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 2*P, 'maxcor': 100})
-                x_solved = result.x
-                partial_fractional_error = final_objective(x_solved) / chi2cutoff
-                if(partial_fractional_error < 1.1):
-                    # result = scipy.optimize.minimize(final_objective, x_solved, method='BFGS', jac=final_gradient, options={'maxiter': 2*P})
-                    result = scipy.optimize.minimize(final_objective, x_solved, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 2*P, 'maxcor': 200})
-                    # result = scipy.optimize.minimize(final_objective, x_solved, method='Newton-CG', jac=final_gradient)
-                    x_solved = result.x
-            fractional_error = final_objective(x_solved) / chi2cutoff
-            print( '    current fractional_error=' + str(fractional_error) )
-            print( '      which is old-fractional = ' + str(final_objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )) )
-        # done the current minimization; do another one
-        best_errors[which_minimum] = fractional_error
-        best_answers[which_minimum] = x_solved
+            # how good is this one?
+            result = scipy.optimize.minimize(final_objective, x_guess, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 3*P, 'maxcor': 50})
+            x_samples[:, i] = result.x
+            y_samples[i] = final_objective(result.x)
+            print('  value = ' + str(y_samples[i]))
+        # pick the best ones and minimize them a bit farther
+        n_subsamples = 20
+        best_sample_indices = np.argsort(y_samples)
+        xsub_samples = np.zeros( (2*P+2, n_subsamples) )
+        ysub_samples = np.zeros( (n_subsamples,) )
+        for i in range(n_subsamples):
+            print('improving guess #' + str(i))
+            sub_index = best_sample_indices[i]
+            print('   which was #' + str(sub_index) + ' with value ' + str(y_samples[sub_index]))
+            result = scipy.optimize.minimize(final_objective, x_samples[:, sub_index], method='L-BFGS-B', jac=final_gradient, options={'maxcor': 50})
+            xsub_samples[:, i] = result.x
+            ysub_samples[i] = final_objective(result.x)
+            print('  value = ' + str(ysub_samples[i]))
+        print('found best guess = ' + str(np.amin(ysub_samples)))
+        x_guess = xsub_samples[:, np.argmin(ysub_samples)]
+    else:
+        def filter_objective(x):
+            x_guess = np.zeros( (2*P + 2) )
+            x_guess[:P] = x[0]*np.real(Ef_estimate)
+            x_guess[P:-2] = x[0]*np.imag(Ef_estimate)
+            x_guess[-2] = x[1]
+            x_guess[-1] = x[2]
+            answer = final_objective(x_guess)
+            return answer
+        result = scipy.optimize.minimize(filter_objective, np.array([1, 1, 0]), method='L-BFGS-B')
+        x_guess = np.zeros( (2*P + 2) )
+        x_guess[:P] = result.x[0]*np.real(Ef_estimate)
+        x_guess[P:-2] = result.x[0]*np.imag(Ef_estimate)
+        x_guess[-2] = result.x[1]
+        x_guess[-1] = result.x[2]
+        print('cloned objective = ' + str(filter_objective(result.x)))
+        
+    
+    # define a basin-hopping step function
+    class MyTakeStep(object):
+        def __init__(self, stepsize=0.5):
+            self.stepsize = stepsize
+        def __call__(self, x):
+            s = self.stepsize
+            perturbation_raw = s*np.random.randn(P) + 1j*s*np.random.randn(P)
+            perturbation = np.fft.fft(perturbation_raw * guess_filter)
+            x[:P] += np.real(perturbation)
+            x[P:-2] += np.imag(perturbation)
+            return x
+
+    # do the minimization, using basin-hopping
+    if(num_basin_hops > 0):
+        mytakestep = MyTakeStep(0.5)
+        result = scipy.optimize.basinhopping(final_objective, x_guess, niter=num_basin_hops, 
+            minimizer_kwargs={'method': 'L-BFGS-B', 'jac': final_gradient, 'options': {'maxcor': 50}},
+            # minimizer_kwargs={'method': 'CG', 'jac': final_gradient},
+            disp=False, T=100, take_step=mytakestep)
+        x_best = result.x
+    else:
+        x_best = x_guess
+    
+    # # do the minimization
+    # num_minima = 5
+    # best_errors = [0]*num_minima
+    # best_answers = [0]*num_minima
+    # for which_minimum in range(num_minima):
+        # fractional_error = 1e99 # just a big number
+        # while fractional_error > 1: 
+            # # create a new guess
+            # if(Ef_estimate is not None):
+                # E_guess_f = Ef_estimate + 0.05*prng.randn(P) + 0.05j*prng.randn(P)
+            # else:
+                # E_guess_t_raw = 1.0 + 0.3*prng.randn(P) + 0.3j*prng.randn(P)
+                # E_guess_f = np.fft.fft(E_guess_t_raw * guess_filter) * guess_filter
+            # x_guess = np.zeros( (2*P + 2) )
+            # x_guess[:P] = np.real(E_guess_f)
+            # x_guess[P:-2] = np.imag(E_guess_f)
+            # x_guess[-2] = 1 # a measure of inverse width in fs^2
+            # x_guess[-1] = 0 # a measure of center-shift in fs^-1
+            # # get the scaling right
+            # def scaling_objective(scale):
+                # x_guess_new = np.copy(x_guess)
+                # x_guess_new[:(2*P)] *= scale
+                # return final_objective(x_guess_new)
+            # best_scale_result = scipy.optimize.minimize_scalar(scaling_objective, bracket=(0.001, 1000))
+            # x_guess[:(2*P)] *= best_scale_result.x
+            # # print(' best scale is ' + str(best_scale_result.x))
+            # # do the minimization
+            # # result = scipy.optimize.minimize(final_objective, x_guess, method='BFGS', jac=final_gradient, options={'maxiter': P})
+            # result = scipy.optimize.minimize(final_objective, x_guess, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 2*P, 'maxcor': 50})
+            # x_solved = result.x
+            # partial_fractional_error = final_objective(x_solved) / chi2cutoff
+            # if(partial_fractional_error < 10):
+                # result = scipy.optimize.minimize(final_objective, x_solved, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 2*P, 'maxcor': 100})
+                # x_solved = result.x
+                # partial_fractional_error = final_objective(x_solved) / chi2cutoff
+                # if(partial_fractional_error < 1.1):
+                    # # result = scipy.optimize.minimize(final_objective, x_solved, method='BFGS', jac=final_gradient, options={'maxiter': 2*P})
+                    # result = scipy.optimize.minimize(final_objective, x_solved, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 2*P, 'maxcor': 200})
+                    # # result = scipy.optimize.minimize(final_objective, x_solved, method='Newton-CG', jac=final_gradient)
+                    # x_solved = result.x
+            # fractional_error = final_objective(x_solved) / chi2cutoff
+            # print( '    current fractional_error=' + str(fractional_error) )
+            # print( '      which is old-fractional = ' + str(final_objective(x_solved) / np.sum( (in_data/in_noise_estimate)**2 )) )
+        # # done the current minimization; do another one
+        # best_errors[which_minimum] = fractional_error
+        # best_answers[which_minimum] = x_solved
         
   
     # # check the output
@@ -223,17 +306,17 @@ def analyze(in_data, in_f, filters, in_noise_estimate, error_ratio, Ef_estimate)
     # plt.colorbar()
     # plt.show()
     
-    # look at the results
-    best_errors = np.array(best_errors)
-    print(best_errors)
-    print('best error = ' + str(np.amin(best_errors)))
-    x_best = best_answers[np.argmin(best_errors)]
+    # # look at the results
+    # best_errors = np.array(best_errors)
+    # print(best_errors)
+    # print('best error = ' + str(np.amin(best_errors)))
+    # x_best = best_answers[np.argmin(best_errors)]
     
     # do a final polishing step
     # result = scipy.optimize.minimize(final_objective, x_best, method='Newton-CG', jac=final_gradient)
     result = scipy.optimize.minimize(final_objective, x_best, method='L-BFGS-B', jac=final_gradient, options={'maxcor': 0.5*P})
     x_final = result.x
-    print('final error = ' + str(final_objective(x_final) / chi2cutoff) + ' from ' + str(np.amin(best_errors)))
+    print('final error = ' + str(final_objective(x_final)))
 
     # all done!
     return x_final[:P] + 1j*x_final[P:-2]

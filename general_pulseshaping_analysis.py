@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # general_pulseshaping_analysis.py
 # Daniel E Wilcox
 # This script takes measurements of shaped pulses and converts
@@ -512,6 +513,9 @@ def analyze(in_data, in_f, filters, in_M1, in_M2, in_noise_estimate, in_num_eval
                 a_guess = 5*(1 + 0.2*prng.randn(in_M1))
                 b_guess = 200*prng.randn(in_M2)
                 b_guess[:] *= np.array([1/(i+1)**3 for i in range(in_M2)])
+                b_guess_shift = 5*prng.randn(in_M2)
+                b_guess_shift[:] *= np.array([1/(i+1)**3 for i in range(in_M2)])
+                b_guess[:] += b_guess_shift
             else:
                 a_guess = a_estimate * np.exp(0.01*prng.randn(in_M1))
                 b_guess = b_estimate * np.exp(0.01*prng.randn(in_M2))
@@ -549,7 +553,10 @@ def analyze(in_data, in_f, filters, in_M1, in_M2, in_noise_estimate, in_num_eval
                 b_guess[:] *= np.array([1/(i+1)**3 for i in range(in_M2)])
             else:
                 a_guess = a_estimate * np.exp(0.01*prng.randn(in_M1))
-                b_guess = b_estimate * np.exp(0.01*prng.randn(in_M2))
+                b_guess = b_estimate * np.exp(0.01*prng.randn(in_M2)) 
+                b_guess_shift = prng.randn(in_M2)
+                b_guess_shift[:] *= np.array([1/(i+1)**4 for i in range(in_M2)])
+                b_guess[:] += b_guess_shift
             x_guess = np.zeros( (in_M1+in_M2+2,) )
             x_guess[:in_M1] = a_guess
             x_guess[in_M1:-2] = b_guess
@@ -581,6 +588,7 @@ def analyze(in_data, in_f, filters, in_M1, in_M2, in_noise_estimate, in_num_eval
     # plt.show()
     
     print( '   final fractional_error=' + str(fractional_error) )
+    print( '   which is absolute=' + str(objective(x_solved)) )
 
     # all done!
     return x_solved[:in_M1], amplitude_basis_functions, x_solved[in_M1:-2], phase_basis_functions # just the final numbers (in real form) is adequate

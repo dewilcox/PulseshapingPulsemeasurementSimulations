@@ -591,17 +591,27 @@ def analyze_general(data_tuple, filters_tuple, in_M1, in_M2, smart_start):
     if(smart_start):
         chosen_M1 = 5
         chosen_M2 = 5
-        best_a, amplitude_basis_functions, best_b, phase_basis_functions = (
+        best_a1, a1_bf, best_b1, p1_bf = (
             general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 500, None)
             )
-        amp_estimate = np.dot(best_a, np.array([ amplitude_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
-        phi_estimate = np.dot(best_b, np.array([ phase_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
-        Ef_estimate = amp_estimate * np.exp(1j*phi_estimate)
+        amp1_estimate = np.dot(best_a1, np.array([ a1_bf[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
+        phi1_estimate = np.dot(best_b1, np.array([ p1_bf[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
+        Ef1_estimate = amp1_estimate * np.exp(1j*phi1_estimate)
+        
+        # do it again
+        chosen_M1 = 10
+        chosen_M2 = 10
+        best_a2, a2_bf, best_b2, p2_bf = (
+            general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 100, Ef1_estimate)
+            )
+        amp2_estimate = np.dot(best_a2, np.array([ a2_bf[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
+        phi2_estimate = np.dot(best_b2, np.array([ p2_bf[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
+        Ef_estimate = amp2_estimate * np.exp(1j*phi2_estimate)
     else:
         Ef_estimate = None
     
     # compute the results
-    best_a, amplitude_basis_functions, best_b, phase_basis_functions = general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, in_M1, in_M2, noise_resampled, 10, Ef_estimate)
+    best_a, amplitude_basis_functions, best_b, phase_basis_functions = general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, in_M1, in_M2, noise_resampled, 50, Ef_estimate)
     # M = len(basis_functions)
     
     # convert to frequency-domain, finely spaced
@@ -642,7 +652,7 @@ def analyze_general(data_tuple, filters_tuple, in_M1, in_M2, smart_start):
     
     
     
-def analyze_general_Fourier(data_tuple, filters_tuple, error_ratio, smart_start):
+def analyze_general_Fourier(data_tuple, filters_tuple, num_basin_hops, smart_start):
     # extract the various inputs
     SHG_resampled = data_tuple[0]
     f_resampled = data_tuple[1]
@@ -655,7 +665,7 @@ def analyze_general_Fourier(data_tuple, filters_tuple, error_ratio, smart_start)
         chosen_M1 = 5
         chosen_M2 = 5
         best_a, amplitude_basis_functions, best_b, phase_basis_functions = (
-            general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 500)
+            general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 700, None)
             )
         amp_estimate = np.dot(best_a, np.array([ amplitude_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
         phi_estimate = np.dot(best_b, np.array([ phase_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
@@ -664,7 +674,7 @@ def analyze_general_Fourier(data_tuple, filters_tuple, error_ratio, smart_start)
         Ef_estimate = None
     
     # compute the results
-    best_E = general_pulseshaping_analysis_Fourier.analyze(SHG_resampled, f_resampled, filters, noise_resampled, error_ratio, Ef_estimate)
+    best_E = general_pulseshaping_analysis_Fourier.analyze(SHG_resampled, f_resampled, filters, noise_resampled, num_basin_hops, Ef_estimate)
     
     # center best_E in the time-domain; this is multiplying by a complex exponential in the frequency domain
     t_resampled = np.fft.fftfreq(f_resampled.size, df_resampled)
@@ -960,8 +970,8 @@ FROG_filters = create_FROG_spectral_filters()
 num_FROG_shots = 5000
 def single_FROG_iteration(iteration_number):
     FROG_data = create_data(FROG_filters, num_FROG_shots)
-    FROG_results = analyze_general(FROG_data, FROG_filters, 10, 10, smart_start=True)
-    # FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, error_ratio=4.71, smart_start=True)
+    # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
+    FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=20, smart_start=True)
     print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
     return FROG_results
 # do many FROG iterations
