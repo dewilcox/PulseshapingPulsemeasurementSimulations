@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # general_pulseshaping_analysis_Fourier.py
 # Daniel E Wilcox
 # This script takes measurements of shaped pulses and converts
@@ -166,7 +167,7 @@ def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estima
     
     # create a starting guess; sample a few places
     if(Ef_estimate is None):
-        n_samples = 200
+        n_samples = 10
         x_samples = np.zeros( (2*P+2, n_samples) )
         y_samples = np.zeros( (n_samples,) )
         for i in range(n_samples):
@@ -190,20 +191,20 @@ def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estima
             result = scipy.optimize.minimize(final_objective, x_guess, method='L-BFGS-B', jac=final_gradient, options={'maxiter': 3*P, 'maxcor': 50})
             x_samples[:, i] = result.x
             y_samples[i] = final_objective(result.x)
-            print('  value = ' + str(y_samples[i]))
+            #print('  value = ' + str(y_samples[i]))
         # pick the best ones and minimize them a bit farther
-        n_subsamples = 20
+        n_subsamples = 3
         best_sample_indices = np.argsort(y_samples)
         xsub_samples = np.zeros( (2*P+2, n_subsamples) )
         ysub_samples = np.zeros( (n_subsamples,) )
         for i in range(n_subsamples):
-            print('improving guess #' + str(i))
+            #print('improving guess #' + str(i))
             sub_index = best_sample_indices[i]
-            print('   which was #' + str(sub_index) + ' with value ' + str(y_samples[sub_index]))
+            #print('   which was #' + str(sub_index) + ' with value ' + str(y_samples[sub_index]))
             result = scipy.optimize.minimize(final_objective, x_samples[:, sub_index], method='L-BFGS-B', jac=final_gradient, options={'maxcor': 50})
             xsub_samples[:, i] = result.x
             ysub_samples[i] = final_objective(result.x)
-            print('  value = ' + str(ysub_samples[i]))
+            #print('  value = ' + str(ysub_samples[i]))
         print('found best guess = ' + str(np.amin(ysub_samples)))
         x_guess = xsub_samples[:, np.argmin(ysub_samples)]
     else:
@@ -238,7 +239,7 @@ def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estima
 
     # do the minimization, using basin-hopping
     if(num_basin_hops > 0):
-        mytakestep = MyTakeStep(0.5)
+        mytakestep = MyTakeStep(0.1)
         result = scipy.optimize.basinhopping(final_objective, x_guess, niter=num_basin_hops, 
             minimizer_kwargs={'method': 'L-BFGS-B', 'jac': final_gradient, 'options': {'maxcor': 50}},
             # minimizer_kwargs={'method': 'CG', 'jac': final_gradient},

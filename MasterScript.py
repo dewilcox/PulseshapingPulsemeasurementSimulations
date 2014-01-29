@@ -119,8 +119,8 @@ def create_SPEAR_spectral_filters():
 
 def create_FROG_spectral_filters():
     # define the parameters of the phase-cycled FROG
-    num_big_T = 10
-    dT = 1.5 # in fs
+    num_big_T = 30
+    dT = 0.8 # in fs
     num_phases = 4
     
     # create the parameters of the filters
@@ -967,11 +967,11 @@ num_iterations = 12
 
 # FROG next
 FROG_filters = create_FROG_spectral_filters()
-num_FROG_shots = 5000
+num_FROG_shots = 6000
 def single_FROG_iteration(iteration_number):
     FROG_data = create_data(FROG_filters, num_FROG_shots)
     # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
-    FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=20, smart_start=True)
+    FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=5, smart_start=True)
     print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
     return FROG_results
 # do many FROG iterations
@@ -979,8 +979,8 @@ FROG_start_fitting = time.time()
 processors = 12
 FROG_pool = multiprocessing.Pool(processes=processors)
 all_FROG_results = FROG_pool.map(single_FROG_iteration, range(num_iterations))
-# processors = 1
-# all_FROG_results = map(single_FROG_iteration, range(num_iterations))
+#processors = 1
+#all_FROG_results = map(single_FROG_iteration, range(num_iterations))
 FROG_end_fitting = time.time()
 print 'total FROG time per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)/num_iterations )
 print 'total FROG time * processors per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)*processors/num_iterations )
