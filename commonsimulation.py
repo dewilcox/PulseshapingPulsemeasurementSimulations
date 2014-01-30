@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # commonsimulation.py
 # This Python script defines the field attributes common to
 # the various  simulations in this folder
@@ -83,7 +84,7 @@ spectral_combos = (
     )
     
 # decide what the combination of spectral intensity and group-delay is
-pulse_combination_number = 2
+pulse_combination_number = 0
 spectral_gd = spectral_combos[pulse_combination_number][0]
 spectral_intensity = spectral_combos[pulse_combination_number][1]
 spectral_phase = spectral_combos[pulse_combination_number][2]

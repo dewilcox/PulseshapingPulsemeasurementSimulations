@@ -171,7 +171,7 @@ def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estima
         x_samples = np.zeros( (2*P+2, n_samples) )
         y_samples = np.zeros( (n_samples,) )
         for i in range(n_samples):
-            print('trying guess #' + str(i))
+            #print('trying guess #' + str(i))
             E_guess_t_raw = 1.0 + 0.5*prng.randn(P) + 0.5j*prng.randn(P)
             E_guess_f = np.fft.fft(E_guess_t_raw * guess_filter) * guess_filter
             x_guess = np.zeros( (2*P + 2) )
@@ -193,7 +193,7 @@ def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estima
             y_samples[i] = final_objective(result.x)
             #print('  value = ' + str(y_samples[i]))
         # pick the best ones and minimize them a bit farther
-        n_subsamples = 3
+        n_subsamples = 1
         best_sample_indices = np.argsort(y_samples)
         xsub_samples = np.zeros( (2*P+2, n_subsamples) )
         ysub_samples = np.zeros( (n_subsamples,) )
