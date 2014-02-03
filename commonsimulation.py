@@ -5,9 +5,10 @@
 
 from __future__ import division
 import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import scipy.integrate
 import os
+import sys
 
 # fundamental constants
 c = 299.792458 # in nm per fs
@@ -84,7 +85,7 @@ spectral_combos = (
     )
     
 # decide what the combination of spectral intensity and group-delay is
-pulse_combination_number = 0
+pulse_combination_number = int(sys.argv[1])
 spectral_gd = spectral_combos[pulse_combination_number][0]
 spectral_intensity = spectral_combos[pulse_combination_number][1]
 spectral_phase = spectral_combos[pulse_combination_number][2]

@@ -5,7 +5,7 @@
 
 import numpy as np
 import scipy.integrate
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 c = 299.792458 # in nm per femtosecond
 T = 10000 # in nm

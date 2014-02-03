@@ -15,6 +15,8 @@
 
 from __future__ import division
 import numpy as np
+import matplotlib
+matplotlib.use('PDF') # this is so we don't require an X window session
 import matplotlib.pyplot as plt
 import commonsimulation as cs
 import shg_spectral_filter
@@ -40,7 +42,7 @@ import time
 def create_SPIDER_spectral_filters():
     # define the parameters of the phase-cycled SPIDER
     tau = 200 # in fs, much larger than pulse-duration
-    delta_omega_list = np.array([0.8, 0.8, 0.2, 0.15])*cs.bandwidth_f*2*np.pi
+    delta_omega_list = np.array([0.7, 0.7, 0.2, 0.15])*cs.bandwidth_f*2*np.pi
     delta_omega = delta_omega_list[cs.pulse_combination_number] # this is the spectral resolution
     phi2 = tau/delta_omega # this is the chirp of the chirped pulse
     Delta_omega = 10*delta_omega # this is the spectral width of the chirped pulse
@@ -66,7 +68,7 @@ def create_SPIDER_spectral_filters():
 def create_MIIPS_spectral_filters():
     # define the parameters of MIIPS
     num_filters = 64
-    alpha_list = np.array([2.0, 2.0, 50.0, 70.0])*np.pi
+    alpha_list = np.array([2.5, 2.0, 50.0, 70.0])*np.pi
     alpha = alpha_list[cs.pulse_combination_number] # in radians
     gamma = 5 # in fs
     deltas = np.linspace(0, 2*np.pi, num_filters, endpoint=False)
@@ -83,7 +85,7 @@ def create_MIIPS_spectral_filters():
 
 def create_CRT_spectral_filters():
     # define the parameters of CRT
-    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-500, 500] ]
+    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-600, 600] ]
     alphas = np.array( alphas_list[cs.pulse_combination_number] )
     num_filters = alphas.size
     
@@ -103,7 +105,7 @@ def create_SPEAR_spectral_filters():
         [-400, -300, 300, 400],
         [-400, -300, 300, 400],
         [-400, -300, 300, 400],
-        [-600, -500, 500, 600] ]
+        [-700, -600, 600, 700] ]
     alphas = np.array( alphas_list[cs.pulse_combination_number] )
     num_filters = alphas.size
     
@@ -876,14 +878,14 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
 # This is the section that runs the simulations
 
 # number of times to run every method
-num_iterations = 120
+num_iterations = 12
 
 
 
 
 # SPIDER first
 SPIDER_filters = create_SPIDER_spectral_filters()
-SPIDER_shots_list = [40000, 40000, 400000, 400000]
+SPIDER_shots_list = [20000, 40000, 400000, 400000]
 num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
 def single_SPIDER_iteration(iteration_number):
     SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
@@ -902,7 +904,7 @@ SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ]
 
 # now MIIPS
 MIIPS_filters = create_MIIPS_spectral_filters()
-MIIPS_shots_per_iteration_list = [5120, 5120, 10240, 20480]
+MIIPS_shots_per_iteration_list = [5120, 5120, 40960, 40960]
 num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
 num_MIIPS_iterations = 4
 def single_MIIPS_solution(iteration_number):
@@ -994,7 +996,7 @@ create_figure(ChirpScan_f, ChirpScan_gd, 'ChirpScan.pdf')
 
 # FROG next
 FROG_filters = create_FROG_spectral_filters()
-num_FROG_shots = 12000
+num_FROG_shots = 6000
 def single_FROG_iteration(iteration_number):
     FROG_data = create_data(FROG_filters, num_FROG_shots)
     # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
@@ -1221,7 +1223,7 @@ ax4.set_ylabel('Phase (rad.)', fontsize=my_font_size)
 ##################################################################
 # save the plot
 fig.tight_layout()
-fig.savefig('PulseCharacteristics.pdf', dpi=600)
+fig.savefig('PulseCharacteristics' + str(cs.pulse_combination_number) + '.pdf', dpi=600)
 
     
     
