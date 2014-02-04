@@ -878,7 +878,7 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
 # This is the section that runs the simulations
 
 # number of times to run every method
-num_iterations = 12
+num_iterations = 120
 
 
 
@@ -1223,7 +1223,7 @@ ax4.set_ylabel('Phase (rad.)', fontsize=my_font_size)
 ##################################################################
 # save the plot
 fig.tight_layout()
-fig.savefig('PulseCharacteristics' + str(cs.pulse_combination_number) + '.pdf', dpi=600)
+fig.savefig('PulseCharacteristics.pdf', dpi=600)
 
     
     

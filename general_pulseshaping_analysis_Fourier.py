@@ -167,7 +167,7 @@ def analyze(in_data, in_f, filters, in_noise_estimate, num_basin_hops, Ef_estima
     
     # create a starting guess; sample a few places
     if(Ef_estimate is None):
-        n_samples = 10
+        n_samples = 12
         x_samples = np.zeros( (2*P+2, n_samples) )
         y_samples = np.zeros( (n_samples,) )
         for i in range(n_samples):
