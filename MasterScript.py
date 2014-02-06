@@ -27,6 +27,7 @@ import multiprocessing
 import scipy.optimize
 import general_pulseshaping_analysis
 import general_pulseshaping_analysis_Fourier
+import general_pulseshaping_analysis_FourierII
 import time
 
 
@@ -121,8 +122,13 @@ def create_SPEAR_spectral_filters():
 
 def create_FROG_spectral_filters():
     # define the parameters of the phase-cycled FROG
-    num_big_T = 60
-    dT = 1.0 # in fs
+    num_big_T = 35
+    last_T = 60 # in fs
+    dT_near_zero = 1.0 # in fs
+    b = scipy.optimize.ridder( lambda b: np.arcsinh( last_T / (b*dT_near_zero) ) - (num_big_T-1.)/b, 1e-5, 1e5 * num_big_T )
+    #b = scipy.optimize.ridder( lambda b: last_T - b*dT_near_zero*np.sinh( (num_big_T-1.)/b ), 5e-2, 1e5 * num_big_T )
+    a = b * dT_near_zero
+    T = a * np.sinh( np.arange(num_big_T) / b )
     num_phases = 4
     
     # create the parameters of the filters
@@ -132,7 +138,7 @@ def create_FROG_spectral_filters():
     
     # create the spectral filters in a list
     spectral_filters = [ 
-        ( lambda omega, cur_T=dT*which_T[i], cur_phase=(np.pi/2)*which_phase[i]: 0.5 + 0.5*np.exp(1j*omega*cur_T + 1j*cur_phase) )
+        ( lambda omega, cur_T=T[which_T[i]], cur_phase=(np.pi/2)*which_phase[i]: 0.5 + 0.5*np.exp(1j*omega*cur_T + 1j*cur_phase) )
         for i in range(num_filters)
         ]
     
@@ -664,19 +670,21 @@ def analyze_general_Fourier(data_tuple, filters_tuple, num_basin_hops, smart_sta
     
     # compute a good initial guess, if wanted
     if(smart_start):
-        chosen_M1 = 5
-        chosen_M2 = 5
-        best_a, amplitude_basis_functions, best_b, phase_basis_functions = (
-            general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 700, None)
-            )
-        amp_estimate = np.dot(best_a, np.array([ amplitude_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
-        phi_estimate = np.dot(best_b, np.array([ phase_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
-        Ef_estimate = amp_estimate * np.exp(1j*phi_estimate)
+        #chosen_M1 = 5
+        #chosen_M2 = 5
+        #best_a, amplitude_basis_functions, best_b, phase_basis_functions = (
+            #general_pulseshaping_analysis.analyze(SHG_resampled, f_resampled, filters, chosen_M1, chosen_M2, noise_resampled, 700, None)
+            #)
+        #amp_estimate = np.dot(best_a, np.array([ amplitude_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M1) ]))
+        #phi_estimate = np.dot(best_b, np.array([ phase_basis_functions[i](2*np.pi*f_resampled) for i in range(chosen_M2) ]))
+        #Ef_estimate = amp_estimate * np.exp(1j*phi_estimate)
+        Ef_estimate = general_pulseshaping_analysis_FourierII.analyze(SHG_resampled, f_resampled, filters, noise_resampled)
     else:
         Ef_estimate = None
     
     # compute the results
     best_E = general_pulseshaping_analysis_Fourier.analyze(SHG_resampled, f_resampled, filters, noise_resampled, num_basin_hops, Ef_estimate)
+    #best_E = general_pulseshaping_analysis_FourierII.analyze(SHG_resampled, f_resampled, filters, noise_resampled, num_basin_hops, Ef_estimate)
     
     # center best_E in the time-domain; this is multiplying by a complex exponential in the frequency domain
     t_resampled = np.fft.fftfreq(f_resampled.size, df_resampled)
@@ -798,11 +806,11 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
     color_true = 'r'
     
     # some plotting ranges for the different pulse-combination numbers
-    view_minimum = [ -40, -40, -10, -40] # in fs
-    view_maximum = [ 40, 40, 10, 50] # in fs
+    view_minimum = [ -40, -40, -15, -50] # in fs
+    view_maximum = [ 30, 30, 10, 50] # in fs
 
     # create the figure
-    plt.figure(figsize=(5.75, 6.0))
+    plt.figure(figsize=(5.75, 5.5))
     my_font_size = 7
     matplotlib.rc('xtick', labelsize=my_font_size)
     matplotlib.rc('ytick', labelsize=my_font_size)
@@ -826,7 +834,7 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
         plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
         if(np.mod(which_plot, 2) == 0):
             plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-        plt.xlim(-1.1*cs.bandwidth_f+cs.central_f, 1.3*cs.bandwidth_f+cs.central_f)
+        plt.xlim(-1.05*cs.bandwidth_f+cs.central_f, 1.3*cs.bandwidth_f+cs.central_f)
         if(which_plot >= 4):
             plt.xlabel('Frequency (PHz)', fontsize=my_font_size)
 
@@ -843,7 +851,7 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
             loc='lower right')
         
         # add a label
-        plt.text(x=0.014, y=0.95, s=list_method_names[which_plot], horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = cur_subplot.transAxes )
+        plt.text(x=0.03, y=0.94, s=list_method_names[which_plot], horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = cur_subplot.transAxes )
 
     # rearrange the plot to be nicely spaced
     plt.tight_layout()
@@ -878,146 +886,146 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
 # This is the section that runs the simulations
 
 # number of times to run every method
-num_iterations = 120
+num_iterations = 12
 
 
 
 
-# # SPIDER first
-# SPIDER_filters = create_SPIDER_spectral_filters()
-# SPIDER_shots_list = [20000, 40000, 400000, 400000]
-# num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
-# def single_SPIDER_iteration(iteration_number):
-    # SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
-    # SPIDER_results = analyze_SPIDER(SPIDER_data, SPIDER_filters)
-    # print 'finished #' + str(iteration_number) + ' of the SPIDER simulations.'
-    # return SPIDER_results
-# # do many SPIDER iterations
-# SPIDER_pool = multiprocessing.Pool(processes=12)
-# all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
-# SPIDER_f = all_SPIDER_results[0][0]
-# SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
-# #print 'Creating the SPIDER figure...'
-# ## create the SPIDER figures
-# #create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
+# SPIDER first
+SPIDER_filters = create_SPIDER_spectral_filters()
+SPIDER_shots_list = [20000, 40000, 400000, 400000]
+num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
+def single_SPIDER_iteration(iteration_number):
+    SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
+    SPIDER_results = analyze_SPIDER(SPIDER_data, SPIDER_filters)
+    print 'finished #' + str(iteration_number) + ' of the SPIDER simulations.'
+    return SPIDER_results
+# do many SPIDER iterations
+SPIDER_pool = multiprocessing.Pool(processes=12)
+all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
+SPIDER_f = all_SPIDER_results[0][0]
+SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
+#print 'Creating the SPIDER figure...'
+## create the SPIDER figures
+#create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
 
 
-# # now MIIPS
-# MIIPS_filters = create_MIIPS_spectral_filters()
-# MIIPS_shots_per_iteration_list = [5120, 5120, 40960, 40960]
-# num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
-# num_MIIPS_iterations = 4
-# def single_MIIPS_solution(iteration_number):
-    # MIIPS_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
-    # for i in range(num_MIIPS_iterations):
-        # # figure out what the current filters are
-        # cur_filters = [
-            # ( lambda omega, cur_filter=MIIPS_filters[0][i]: cur_filter(omega) * MIIPS_compensation(omega) )
-            # for i in range(len(MIIPS_filters[0]))]
-        # # take some MIIPS data
-        # cur_MIIPS_data = create_data( (cur_filters,) , num_MIIPS_shots_per_iteration)
-        # # set the pulse-shaper to compensate
-        # MIIPS_compensation = create_MIIPS_compensation(MIIPS_compensation, cur_MIIPS_data, MIIPS_filters)
-    # # now look at the last version of the compensation to get the final results
-    # MIIPS_results = analyze_MIIPS(MIIPS_compensation, cur_MIIPS_data)
-    # print 'finished #' + str(iteration_number) + ' of the MIIPS simulations.'
-    # return MIIPS_results
-# # do many MIIPS solutions
-# MIIPS_pool = multiprocessing.Pool(processes=12)
-# all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
-# MIIPS_f = all_MIIPS_results[0][0]
-# MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
-# # print 'Creating the MIIPS figure...'
-# # # create the MIIPS figures
-# # create_figures(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
+# now MIIPS
+MIIPS_filters = create_MIIPS_spectral_filters()
+MIIPS_shots_per_iteration_list = [5120, 5120, 40960, 40960]
+num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
+num_MIIPS_iterations = 4
+def single_MIIPS_solution(iteration_number):
+    MIIPS_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
+    for i in range(num_MIIPS_iterations):
+        # figure out what the current filters are
+        cur_filters = [
+            ( lambda omega, cur_filter=MIIPS_filters[0][i]: cur_filter(omega) * MIIPS_compensation(omega) )
+            for i in range(len(MIIPS_filters[0]))]
+        # take some MIIPS data
+        cur_MIIPS_data = create_data( (cur_filters,) , num_MIIPS_shots_per_iteration)
+        # set the pulse-shaper to compensate
+        MIIPS_compensation = create_MIIPS_compensation(MIIPS_compensation, cur_MIIPS_data, MIIPS_filters)
+    # now look at the last version of the compensation to get the final results
+    MIIPS_results = analyze_MIIPS(MIIPS_compensation, cur_MIIPS_data)
+    print 'finished #' + str(iteration_number) + ' of the MIIPS simulations.'
+    return MIIPS_results
+# do many MIIPS solutions
+MIIPS_pool = multiprocessing.Pool(processes=12)
+all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
+MIIPS_f = all_MIIPS_results[0][0]
+MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
+# print 'Creating the MIIPS figure...'
+# # create the MIIPS figures
+# create_figures(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
 
 
-# # CRT next
-# CRT_filters = create_CRT_spectral_filters()
-# num_CRT_shots = 500
-# def single_CRT_iteration(iteration_number):
-    # CRT_data = create_data(CRT_filters, num_CRT_shots)
-    # CRT_results = analyze_CRT(CRT_data, CRT_filters)
-    # print 'finished #' + str(iteration_number) + ' of the CRT simulations.'
-    # return CRT_results
-# # do many CRT iterations
-# CRT_pool = multiprocessing.Pool(processes=12)
-# all_CRT_results = CRT_pool.map(single_CRT_iteration, range(num_iterations))
-# CRT_f = all_CRT_results[0][0]
-# CRT_gd = np.array([ all_CRT_results[i][1] for i in range(num_iterations) ])
-# # print 'Creating the CRT figure...'
-# # # create the CRT figure
-# # create_figures(CRT_f, CRT_gd, 'CRT.pdf')
+# CRT next
+CRT_filters = create_CRT_spectral_filters()
+num_CRT_shots = 500
+def single_CRT_iteration(iteration_number):
+    CRT_data = create_data(CRT_filters, num_CRT_shots)
+    CRT_results = analyze_CRT(CRT_data, CRT_filters)
+    print 'finished #' + str(iteration_number) + ' of the CRT simulations.'
+    return CRT_results
+# do many CRT iterations
+CRT_pool = multiprocessing.Pool(processes=12)
+all_CRT_results = CRT_pool.map(single_CRT_iteration, range(num_iterations))
+CRT_f = all_CRT_results[0][0]
+CRT_gd = np.array([ all_CRT_results[i][1] for i in range(num_iterations) ])
+# print 'Creating the CRT figure...'
+# # create the CRT figure
+# create_figures(CRT_f, CRT_gd, 'CRT.pdf')
 
 
-# # now SPEAR
-# SPEAR_filters = create_SPEAR_spectral_filters()
-# num_SPEAR_shots = 500
-# def single_SPEAR_iteration(iteration_number):
-    # SPEAR_data = create_data(SPEAR_filters, num_SPEAR_shots)
-    # SPEAR_results = analyze_SPEAR(SPEAR_data, SPEAR_filters)
-    # print 'finished #' + str(iteration_number) + ' of the SPEAR simulations.'
-    # return SPEAR_results
-# # do many SPEAR iterations
-# SPEAR_pool = multiprocessing.Pool(processes=12)
-# all_SPEAR_results = SPEAR_pool.map(single_SPEAR_iteration, range(num_iterations))
-# SPEAR_f = all_SPEAR_results[0][0]
-# SPEAR_gd = np.array([ all_SPEAR_results[i][1] for i in range(num_iterations) ])
-# # print 'Creating the SPEAR figure...'
-# # # create the SPEAR figure
-# # create_figures(SPEAR_f, SPEAR_gd, 'SPEAR.pdf')
+# now SPEAR
+SPEAR_filters = create_SPEAR_spectral_filters()
+num_SPEAR_shots = 500
+def single_SPEAR_iteration(iteration_number):
+    SPEAR_data = create_data(SPEAR_filters, num_SPEAR_shots)
+    SPEAR_results = analyze_SPEAR(SPEAR_data, SPEAR_filters)
+    print 'finished #' + str(iteration_number) + ' of the SPEAR simulations.'
+    return SPEAR_results
+# do many SPEAR iterations
+SPEAR_pool = multiprocessing.Pool(processes=12)
+all_SPEAR_results = SPEAR_pool.map(single_SPEAR_iteration, range(num_iterations))
+SPEAR_f = all_SPEAR_results[0][0]
+SPEAR_gd = np.array([ all_SPEAR_results[i][1] for i in range(num_iterations) ])
+# print 'Creating the SPEAR figure...'
+# # create the SPEAR figure
+# create_figures(SPEAR_f, SPEAR_gd, 'SPEAR.pdf')
 
 
-# # and ChirpScan 
-# ChirpScan_filters = create_ChirpScan_spectral_filters()
-# num_ChirpScan_shots = 50
-# def single_ChirpScan_iteration(iteration_number):
-    # ChirpScan_data = create_data(ChirpScan_filters, num_ChirpScan_shots)
-    # # ChirpScan_results = analyze_general(ChirpScan_data, ChirpScan_filters, 30, 30)
-    # ChirpScan_results = analyze_general_Fourier(ChirpScan_data, ChirpScan_filters, num_basin_hops=5, smart_start=False)
-    # print 'finished #' + str(iteration_number) + ' of the ChirpScan simulations.'
-    # return ChirpScan_results
-# # do many ChirpScan iterations
-# ChirpScan_start_fitting = time.time()
-# processors = 12
-# ChirpScan_pool = multiprocessing.Pool(processes=12)
-# all_ChirpScan_results = ChirpScan_pool.map(single_ChirpScan_iteration, range(num_iterations))
-# # processors = 1
-# # all_ChirpScan_results = map(single_ChirpScan_iteration, range(num_iterations))
-# ChirpScan_end_fitting = time.time()
-# print 'total ChirpScan time per iteration: ' + str( (ChirpScan_end_fitting - ChirpScan_start_fitting)/num_iterations )
-# print 'total ChirpScan time * processors per iteration: ' + str( (ChirpScan_end_fitting - ChirpScan_start_fitting)*processors/num_iterations )
-# ChirpScan_f = all_ChirpScan_results[0][0]
-# ChirpScan_gd = np.array([ all_ChirpScan_results[i][1] for i in range(num_iterations) ])
-# # print 'Creating the ChirpScan figure...'
-# # create the ChirpScan figure
-# create_figure(ChirpScan_f, ChirpScan_gd, 'ChirpScan.pdf')
+# and ChirpScan 
+ChirpScan_filters = create_ChirpScan_spectral_filters()
+num_ChirpScan_shots = 50
+def single_ChirpScan_iteration(iteration_number):
+    ChirpScan_data = create_data(ChirpScan_filters, num_ChirpScan_shots)
+    # ChirpScan_results = analyze_general(ChirpScan_data, ChirpScan_filters, 30, 30)
+    ChirpScan_results = analyze_general_Fourier(ChirpScan_data, ChirpScan_filters, num_basin_hops=0, smart_start=True)
+    print 'finished #' + str(iteration_number) + ' of the ChirpScan simulations.'
+    return ChirpScan_results
+# do many ChirpScan iterations
+ChirpScan_start_fitting = time.time()
+processors = 12
+ChirpScan_pool = multiprocessing.Pool(processes=12)
+all_ChirpScan_results = ChirpScan_pool.map(single_ChirpScan_iteration, range(num_iterations))
+# processors = 1
+# all_ChirpScan_results = map(single_ChirpScan_iteration, range(num_iterations))
+ChirpScan_end_fitting = time.time()
+print 'total ChirpScan time per iteration: ' + str( (ChirpScan_end_fitting - ChirpScan_start_fitting)/num_iterations )
+print 'total ChirpScan time * processors per iteration: ' + str( (ChirpScan_end_fitting - ChirpScan_start_fitting)*processors/num_iterations )
+ChirpScan_f = all_ChirpScan_results[0][0]
+ChirpScan_gd = np.array([ all_ChirpScan_results[i][1] for i in range(num_iterations) ])
+# print 'Creating the ChirpScan figure...'
+# create the ChirpScan figure
+create_figure(ChirpScan_f, ChirpScan_gd, 'ChirpScan.pdf')
 
 
-# # FROG next
-# FROG_filters = create_FROG_spectral_filters()
-# num_FROG_shots = 6000
-# def single_FROG_iteration(iteration_number):
-    # FROG_data = create_data(FROG_filters, num_FROG_shots)
-    # # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
-    # FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=5, smart_start=False)
-    # print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
-    # return FROG_results
-# # do many FROG iterations
-# FROG_start_fitting = time.time()
-# processors = 12
-# FROG_pool = multiprocessing.Pool(processes=processors)
-# all_FROG_results = FROG_pool.map(single_FROG_iteration, range(num_iterations))
-# #processors = 1
-# #all_FROG_results = map(single_FROG_iteration, range(num_iterations))
-# FROG_end_fitting = time.time()
-# print 'total FROG time per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)/num_iterations )
-# print 'total FROG time * processors per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)*processors/num_iterations )
-# FROG_f = all_FROG_results[0][0]
-# FROG_gd = np.array([ all_FROG_results[i][1] for i in range(num_iterations) ])
-# # print 'Creating the FROG figure...'
-# # create the FROG figure
-# create_figure(FROG_f, FROG_gd, 'FROG.pdf')
+# FROG next
+FROG_filters = create_FROG_spectral_filters()
+num_FROG_shots = 3500
+def single_FROG_iteration(iteration_number):
+    FROG_data = create_data(FROG_filters, num_FROG_shots)
+    # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
+    FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=0, smart_start=True)
+    print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
+    return FROG_results
+# do many FROG iterations
+FROG_start_fitting = time.time()
+processors = 12
+FROG_pool = multiprocessing.Pool(processes=processors)
+all_FROG_results = FROG_pool.map(single_FROG_iteration, range(num_iterations))
+#processors = 1
+#all_FROG_results = map(single_FROG_iteration, range(num_iterations))
+FROG_end_fitting = time.time()
+print 'total FROG time per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)/num_iterations )
+print 'total FROG time * processors per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)*processors/num_iterations )
+FROG_f = all_FROG_results[0][0]
+FROG_gd = np.array([ all_FROG_results[i][1] for i in range(num_iterations) ])
+# print 'Creating the FROG figure...'
+# create the FROG figure
+create_figure(FROG_f, FROG_gd, 'FROG.pdf')
 
 
 # # direct-fitted MIIPS 
@@ -1040,13 +1048,13 @@ num_iterations = 120
 
 
 
-# # plot the results
-# print 'Creating the tiled figure...'
-# create_tiled_figure(
-    # [SPIDER_f, MIIPS_f, FROG_f, CRT_f, SPEAR_f, ChirpScan_f],
-    # [SPIDER_gd, MIIPS_gd, FROG_gd, CRT_gd, SPEAR_gd, ChirpScan_gd],
-    # ['SPIDER', 'MIIPS', 'FROG', 'CRT', 'SPEAR', 'ChirpScan'],
-    # 'TiledFigure' + str(cs.pulse_combination_number) + '.pdf')
+# plot the results
+print 'Creating the tiled figure...'
+create_tiled_figure(
+    [SPIDER_f, MIIPS_f, FROG_f, CRT_f, SPEAR_f, ChirpScan_f],
+    [SPIDER_gd, MIIPS_gd, FROG_gd, CRT_gd, SPEAR_gd, ChirpScan_gd],
+    ['SPIDER', 'MIIPS', 'FROG', 'CRT', 'SPEAR', 'ChirpScan'],
+    'TiledFigure' + str(cs.pulse_combination_number) + '.pdf')
 
 
 
