@@ -151,7 +151,7 @@ def analyze(in_data, in_f, filters, in_noise_estimate):
     # chi2cutoff = error_ratio*N*P
     
     # create a starting guess; sample a few places
-    n_samples = 2
+    n_samples = 8
     x_samples = np.zeros( (2*P, n_samples) )
     y_samples = np.zeros( (n_samples,) )
     for i in range(n_samples):
