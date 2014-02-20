@@ -507,13 +507,14 @@ def analyze_CRT(CRT_data_tuple, CRT_filters_tuple):
     
 
 # this is the SPEAR transformation from measured data to measured phase-second-derivative
-def __compute_SPEAR(alpha_list, y_list):
+def __compute_SPEAR(alpha_list, y_list, noise_resampled):
     # create the analytic equation for b
     s_list = 2.0*(alpha_list>0).astype(int) - 1.0
-    term1 = lambda b: np.sum(s_list*y_list/(b+alpha_list))
-    term2 = lambda b: np.sum(1.0/(b+alpha_list)**3)
-    term3 = lambda b: np.sum(1.0/(b+alpha_list)**2)
-    term4 = lambda b: np.sum(s_list*y_list/(b+alpha_list)**2)
+    weight_list = 1.0 / noise_resampled
+    term1 = lambda b: np.sum(s_list*weight_list*y_list/(b+alpha_list))
+    term2 = lambda b: np.sum(weight_list/(b+alpha_list)**3)
+    term3 = lambda b: np.sum(weight_list/(b+alpha_list)**2)
+    term4 = lambda b: np.sum(s_list*weight_list*y_list/(b+alpha_list)**2)
     equation = lambda b: term1(b) * term2(b) - term3(b) * term4(b)
     c_function = lambda b: term1(b) / term3(b)
     
@@ -548,6 +549,7 @@ def analyze_SPEAR(SPEAR_data_tuple, SPEAR_filters_tuple):
     # extract the various inputs
     SHG_resampled = SPEAR_data_tuple[0]
     f_resampled = SPEAR_data_tuple[1]
+    noise_resampled = SPEAR_data_tuple[2]
     f_straight = np.fft.fftshift(f_resampled)
     N = f_resampled.size
     omega = 2*np.pi*f_resampled
@@ -555,7 +557,7 @@ def analyze_SPEAR(SPEAR_data_tuple, SPEAR_filters_tuple):
     alphas = SPEAR_filters_tuple[1]
     
     # compute the measured GDD values
-    measured_gdd = np.array([ __compute_SPEAR(alphas, SHG_resampled[:, i])[0] for i in range(N) ])
+    measured_gdd = np.array([ __compute_SPEAR(alphas, SHG_resampled[:, i], noise_resampled[:, i])[0] for i in range(N) ])
     # assure finiteness
     unknown_indices = np.logical_not(np.isfinite(measured_gdd))
     measured_gdd[unknown_indices] = 100*prng.randn( np.sum(unknown_indices) ) # standard deviation of 100 fs^2
@@ -764,18 +766,18 @@ def create_figure(f, group_delays, file_name):
     # view_maximum = 10 # in fs
 
     # shade a couple of areas
-    plt.fill_between(f+cs.central_f, percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
-    plt.fill_between(f+cs.central_f, percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
+    plt.fill_between(1000*(f+cs.central_f), percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
+    plt.fill_between(1000*(f+cs.central_f), percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
     
     # plot the true group-delay
-    plt.plot(cs.f+cs.central_f, cs.spectral_gd, color_true)
+    plt.plot(1000*(cs.f+cs.central_f), cs.spectral_gd, color_true)
     
     # a few more details
     # plt.ylim(view_minimum, view_maximum) 
     plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
     plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-    plt.xlim(-1.1*cs.bandwidth_f+cs.central_f, 1.3*cs.bandwidth_f+cs.central_f)
-    plt.xlabel('Frequency (PHz)', fontsize=my_font_size)
+    plt.xlim(1000*(-1.1*cs.bandwidth_f+cs.central_f), 1000*(1.3*cs.bandwidth_f+cs.central_f))
+    plt.xlabel('Frequency (THz)', fontsize=my_font_size)
 
     # add the legend
     # create not-drawn proxies compatible with "legend"
@@ -824,19 +826,19 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
         percentiles_7030 = np.percentile(list_group_delays[which_plot], (70, 30), axis=0)
 
         # shade a couple of areas
-        plt.fill_between(list_f[which_plot]+cs.central_f, percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
-        plt.fill_between(list_f[which_plot]+cs.central_f, percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
+        plt.fill_between(1000*(list_f[which_plot]+cs.central_f), percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
+        plt.fill_between(1000*(list_f[which_plot]+cs.central_f), percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
         
         # plot the true group-delay
-        plt.plot(cs.f+cs.central_f, cs.spectral_gd, color_true)
+        plt.plot(1000*(cs.f+cs.central_f), cs.spectral_gd, color_true)
         
         # a few more details
         plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
         if(np.mod(which_plot, 2) == 0):
             plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-        plt.xlim(-1.05*cs.bandwidth_f+cs.central_f, 1.3*cs.bandwidth_f+cs.central_f)
+        plt.xlim(1000*(-1.05*cs.bandwidth_f+cs.central_f), 1000*(1.3*cs.bandwidth_f+cs.central_f))
         if(which_plot >= 4):
-            plt.xlabel('Frequency (PHz)', fontsize=my_font_size)
+            plt.xlabel('Frequency (THz)', fontsize=my_font_size)
 
         # add the legend
         # create not-drawn proxies compatible with "legend"
@@ -1090,14 +1092,14 @@ matplotlib.rc('ytick', labelsize=my_font_size)
 #################################################################
 # add the spectral intensity and group-delay of the first pulse
 ax1 = fig.add_subplot(4, 2, 1)
-ax1.plot(cs.f+cs.central_f, cs.spectral_combos[0][1]/np.amax(cs.spectral_combos[0][1]), 'b:')
-# ax1.set_xlabel('Frequency (PHz)', fontsize=my_font_size)
+ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[0][1]/np.amax(cs.spectral_combos[0][1]), 'b:')
+# ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
 ax2 = ax1.twinx()
-ax2.plot(cs.f+cs.central_f, cs.spectral_combos[0][0], 'r-')
-ax2.set_xlim(-1.5*cs.bandwidth_f+cs.central_f, 1.7*cs.bandwidth_f+cs.central_f)
+ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[0][0], 'r-')
+ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
 ax2.set_ylim(-10, 45)
 plt.yticks([0, 20, 40])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
@@ -1128,14 +1130,14 @@ plt.text(x=0.04, y=0.9, s='case 1', horizontalalignment='left', verticalalignmen
 #################################################################
 # add the spectral intensity and group-delay of the second pulse
 ax1 = fig.add_subplot(4, 2, 3)
-ax1.plot(cs.f+cs.central_f, cs.spectral_combos[1][1]/np.amax(cs.spectral_combos[1][1]), 'b:')
-# ax1.set_xlabel('Frequency (PHz)', fontsize=my_font_size)
+ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[1][1]/np.amax(cs.spectral_combos[1][1]), 'b:')
+# ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
 ax2 = ax1.twinx()
-ax2.plot(cs.f+cs.central_f, cs.spectral_combos[1][0], 'r-')
-ax2.set_xlim(-1.5*cs.bandwidth_f+cs.central_f, 1.7*cs.bandwidth_f+cs.central_f)
+ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[1][0], 'r-')
+ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
 ax2.set_ylim(-10, 45)
 plt.yticks([0, 20, 40])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
@@ -1165,14 +1167,14 @@ plt.text(x=0.04, y=0.9, s='case 2', horizontalalignment='left', verticalalignmen
 #################################################################
 # add the spectral intensity and group-delay of the third pulse
 ax1 = fig.add_subplot(4, 2, 5)
-ax1.plot(cs.f+cs.central_f, cs.spectral_combos[2][1]/np.amax(cs.spectral_combos[2][1]), 'b:')
-# ax1.set_xlabel('Frequency (PHz)', fontsize=my_font_size)
+ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[2][1]/np.amax(cs.spectral_combos[2][1]), 'b:')
+# ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
 ax2 = ax1.twinx()
-ax2.plot(cs.f+cs.central_f, cs.spectral_combos[2][0], 'r-')
-ax2.set_xlim(-1.5*cs.bandwidth_f+cs.central_f, 1.7*cs.bandwidth_f+cs.central_f)
+ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[2][0], 'r-')
+ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
 ax2.set_ylim(-5, 12)
 plt.yticks([0, 10])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
@@ -1202,14 +1204,14 @@ plt.text(x=0.04, y=0.9, s='case 3', horizontalalignment='left', verticalalignmen
 #################################################################
 # add the spectral intensity and group-delay of the fourth pulse
 ax1 = fig.add_subplot(4, 2, 7)
-ax1.plot(cs.f+cs.central_f, cs.spectral_combos[3][1]/np.amax(cs.spectral_combos[3][1]), 'b:')
-ax1.set_xlabel('Frequency (PHz)', fontsize=my_font_size)
+ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[3][1]/np.amax(cs.spectral_combos[3][1]), 'b:')
+ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
 ax2 = ax1.twinx()
-ax2.plot(cs.f+cs.central_f, cs.spectral_combos[3][0], 'r-')
-ax2.set_xlim(-1.5*cs.bandwidth_f+cs.central_f, 1.7*cs.bandwidth_f+cs.central_f)
+ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[3][0], 'r-')
+ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
 ax2.set_ylim(-10, 45)
 plt.yticks([0, 20, 40])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
