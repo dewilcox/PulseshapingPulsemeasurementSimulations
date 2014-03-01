@@ -776,7 +776,7 @@ def create_figure(f, group_delays, file_name):
     # plt.ylim(view_minimum, view_maximum) 
     plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
     plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-    plt.xlim(1000*(-1.1*cs.bandwidth_f+cs.central_f), 1000*(1.3*cs.bandwidth_f+cs.central_f))
+    plt.xlim(1000*(-1.1*cs.bandwidth_f+cs.central_f), 1000*(1.25*cs.bandwidth_f+cs.central_f))
     plt.xlabel('Frequency (THz)', fontsize=my_font_size)
 
     # add the legend
@@ -836,7 +836,7 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
         plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
         if(np.mod(which_plot, 2) == 0):
             plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-        plt.xlim(1000*(-1.05*cs.bandwidth_f+cs.central_f), 1000*(1.3*cs.bandwidth_f+cs.central_f))
+        plt.xlim(1000*(-1.05*cs.bandwidth_f+cs.central_f), 1000*(1.25*cs.bandwidth_f+cs.central_f))
         if(which_plot >= 4):
             plt.xlabel('Frequency (THz)', fontsize=my_font_size)
 
@@ -908,8 +908,8 @@ all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iteratio
 SPIDER_f = all_SPIDER_results[0][0]
 SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
 #print 'Creating the SPIDER figure...'
-## create the SPIDER figures
-#create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
+# create the SPIDER figure
+create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
 
 
 # now MIIPS
@@ -938,8 +938,8 @@ all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
 MIIPS_f = all_MIIPS_results[0][0]
 MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
 # print 'Creating the MIIPS figure...'
-# # create the MIIPS figures
-# create_figures(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
+# create the MIIPS figure
+create_figure(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
 
 
 # CRT next
@@ -956,8 +956,8 @@ all_CRT_results = CRT_pool.map(single_CRT_iteration, range(num_iterations))
 CRT_f = all_CRT_results[0][0]
 CRT_gd = np.array([ all_CRT_results[i][1] for i in range(num_iterations) ])
 # print 'Creating the CRT figure...'
-# # create the CRT figure
-# create_figures(CRT_f, CRT_gd, 'CRT.pdf')
+# create the CRT figure
+create_figure(CRT_f, CRT_gd, 'CRT.pdf')
 
 
 # now SPEAR
@@ -974,8 +974,8 @@ all_SPEAR_results = SPEAR_pool.map(single_SPEAR_iteration, range(num_iterations)
 SPEAR_f = all_SPEAR_results[0][0]
 SPEAR_gd = np.array([ all_SPEAR_results[i][1] for i in range(num_iterations) ])
 # print 'Creating the SPEAR figure...'
-# # create the SPEAR figure
-# create_figures(SPEAR_f, SPEAR_gd, 'SPEAR.pdf')
+# create the SPEAR figure
+create_figure(SPEAR_f, SPEAR_gd, 'SPEAR.pdf')
 
 
 # and ChirpScan 
