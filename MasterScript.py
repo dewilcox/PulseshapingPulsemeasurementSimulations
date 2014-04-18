@@ -16,12 +16,13 @@
 from __future__ import division
 import numpy as np
 import matplotlib
-matplotlib.use('PDF') # this is so we don't require an X window session
+#matplotlib.use('PDF') # this is so we don't require an X window session
 import matplotlib.pyplot as plt
 import commonsimulation as cs
 import shg_spectral_filter
 import scipy.integrate
 import scipy.interpolate
+import scipy.optimize
 import matplotlib
 import multiprocessing
 import scipy.optimize
@@ -29,7 +30,36 @@ import general_pulseshaping_analysis
 import general_pulseshaping_analysis_Fourier
 import general_pulseshaping_analysis_FourierII
 import time
+import os
 
+
+
+
+
+
+
+# define a round-to-significant-figures function
+# mostly copied from http://stackoverflow.com/questions/3410976/how-to-round-a-number-to-significant-figures-in-python
+def round_sig(x, sig=2):
+    return np.around(x, sig-int(np.floor(np.log10(np.abs(x))))-1)
+
+    
+# this truncation function makes negative "wavelengths" (being the inverse of negative frequencies)
+# be very large so they don't plot
+def trunc_function(x):
+    less_than_zero = x < 0
+    answer = np.zeros_like(x)
+    answer[less_than_zero] = 1e99
+    answer[np.logical_not(less_than_zero)] = x[np.logical_not(less_than_zero)]
+    return answer
+
+
+
+
+    
+# define the regions of interest
+ROI_line1 = [540, 555, 540, 555] # in nm
+ROI_line2 = [735, 735, 735, 735] # in nm
 
 
 
@@ -43,7 +73,7 @@ import time
 def create_SPIDER_spectral_filters():
     # define the parameters of the phase-cycled SPIDER
     tau = 200 # in fs, much larger than pulse-duration
-    delta_omega_list = np.array([0.7, 0.7, 0.2, 0.15])*cs.bandwidth_f*2*np.pi
+    delta_omega_list = np.array([0.7, 0.5, 0.2, 0.13])*cs.bandwidth_f*2*np.pi
     delta_omega = delta_omega_list[cs.pulse_combination_number] # this is the spectral resolution
     phi2 = tau/delta_omega # this is the chirp of the chirped pulse
     Delta_omega = 10*delta_omega # this is the spectral width of the chirped pulse
@@ -69,9 +99,9 @@ def create_SPIDER_spectral_filters():
 def create_MIIPS_spectral_filters():
     # define the parameters of MIIPS
     num_filters = 64
-    alpha_list = np.array([2.5, 2.0, 50.0, 70.0])*np.pi
+    alpha_list = np.array([30.0, 2.0, 50.0, 80.0])*np.pi
     alpha = alpha_list[cs.pulse_combination_number] # in radians
-    gamma = 5 # in fs
+    gamma = 4.0 # in fs
     deltas = np.linspace(0, 2*np.pi, num_filters, endpoint=False)
     
     # create the spectral filters in a list
@@ -82,7 +112,81 @@ def create_MIIPS_spectral_filters():
     
     # return the results: the filters and some extra information for retrieval
     return (spectral_filters, alpha, gamma, deltas)
+
+
+
+
+def create_MIIPS_S_spectral_filters():
+    # define the parameters of MIIPS-S
+    num_spectral_intervals_inside_ROI = 15
+    assert(num_spectral_intervals_inside_ROI % 2 == 1)
+    tau_list = np.linspace(-200, 200, 30)
     
+    # create the spectral intervals
+    ROI_nm = np.array([ROI_line1[cs.pulse_combination_number], ROI_line2[cs.pulse_combination_number]])
+    ROI_f = np.sort(cs.c/ROI_nm) - cs.central_f
+    interval_edges_inside, df_interval = np.linspace(ROI_f[0], ROI_f[1], num_spectral_intervals_inside_ROI+1, retstep=True)
+    left_f_boundaries = np.zeros( (num_spectral_intervals_inside_ROI+4,) )
+    left_f_boundaries[0] = ROI_f[0] - 10*df_interval
+    left_f_boundaries[1] = ROI_f[0] - df_interval
+    left_f_boundaries[2:-1] = interval_edges_inside
+    left_f_boundaries[-1] = ROI_f[1] + df_interval
+    right_f_boundaries = np.zeros( (num_spectral_intervals_inside_ROI+4,) )
+    right_f_boundaries[:-1] = left_f_boundaries[1:]
+    right_f_boundaries[-1] = ROI_f[1] + 10*df_interval
+    #plt.figure()
+    #plt.plot(cs.c/(left_f_boundaries+cs.central_f))
+    #plt.plot(cs.c/(right_f_boundaries+cs.central_f))
+    #plt.figure()
+    #plt.plot(left_f_boundaries+cs.central_f)
+    #plt.plot(right_f_boundaries+cs.central_f)
+    #plt.show()
+    
+    # create the pulse-shape lists
+    all_intervals = np.arange(left_f_boundaries.size)
+    central_interval = 2 + int(np.floor((num_spectral_intervals_inside_ROI-1.0)/2.0))
+    fixed_interval_left = central_interval - 2
+    fixed_interval_right = central_interval + 2
+    variable_interval_list = np.hstack( (all_intervals[:(central_interval+1)], all_intervals[central_interval:]) )
+    which_reference_interval = np.zeros_like(variable_interval_list)
+    which_reference_interval[:(central_interval+1)] = fixed_interval_right
+    which_reference_interval[(central_interval+1):] = fixed_interval_left
+    big_tau_list = np.zeros( (tau_list.size * variable_interval_list.size,) )
+    big_variable_interval_list = np.zeros( (tau_list.size * variable_interval_list.size,) )
+    big_reference_interval_list = np.zeros( (tau_list.size * variable_interval_list.size,) )
+    cur_entry = 0
+    for i in range(tau_list.size):
+        for j in range(variable_interval_list.size):
+            big_tau_list[cur_entry] = tau_list[i]
+            big_variable_interval_list[cur_entry] = variable_interval_list[j]
+            big_reference_interval_list[cur_entry] = which_reference_interval[j]
+            cur_entry += 1
+    num_filters = big_variable_interval_list.size
+    
+    # create the spectral filters
+    amplitude_filter = lambda omega, left, right: np.logical_and(omega>left, omega<right)
+    
+    # create the spectral filters in a list
+    spectral_filters = [ 
+        ( lambda omega, var_interval=big_variable_interval_list[i], fixed_interval=big_reference_interval_list[i], tau=big_tau_list[i] : 
+            amplitude_filter(omega, 2*np.pi*left_f_boundaries[fixed_interval], 2*np.pi*right_f_boundaries[fixed_interval]) + 
+            amplitude_filter(omega, 2*np.pi*left_f_boundaries[var_interval], 2*np.pi*right_f_boundaries[var_interval]) * np.exp(1j*omega*tau) )
+        for i in range(num_filters)
+        ]
+    
+    #for i in range(num_filters):
+        #plt.figure()
+        #plt.plot(cs.f, np.real(spectral_filters[i](2*np.pi*cs.f)))
+        #plt.plot(cs.f, np.imag(spectral_filters[i](2*np.pi*cs.f)))
+        #plt.plot(cs.f, cs.spectral_amplitude/np.amax(cs.spectral_amplitude))
+        #plt.ylim(-1.1, 1.1)
+    #plt.show()
+    
+    # return the results: the filters and some extra information for retrieval
+    return (spectral_filters, big_variable_interval_list, big_reference_interval_list, big_tau_list, tau_list, left_f_boundaries, right_f_boundaries)
+    
+    
+
 
 def create_CRT_spectral_filters():
     # define the parameters of CRT
@@ -100,13 +204,16 @@ def create_CRT_spectral_filters():
     return (spectral_filters, alphas)
     
 
-def create_SPEAR_spectral_filters():
+
+
+def create_SPEAR1_spectral_filters():
     # define the parameters of SPEAR
-    alphas_list = [
-        [-400, -300, 300, 400],
-        [-400, -300, 300, 400],
-        [-400, -300, 300, 400],
-        [-700, -600, 600, 700] ]
+    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-600, 600] ]
+    # alphas_list = [
+        # [-400, -300, 300, 400],
+        # [-400, -300, 300, 400],
+        # [-400, -300, 300, 400],
+        # [-700, -600, 600, 700] ]
     alphas = np.array( alphas_list[cs.pulse_combination_number] )
     num_filters = alphas.size
     
@@ -119,6 +226,30 @@ def create_SPEAR_spectral_filters():
     # return the results: the filters and some extra information for retrieval
     return (spectral_filters, alphas)
     
+
+
+
+def create_SPEAR2_spectral_filters():
+    # define the parameters of SPEAR
+    alphas_list = [
+        [-450, -400, -350, -300, 300, 350, 400, 450],
+        [-450, -400, -350, -300, 300, 350, 400, 450],
+        [-450, -400, -350, -300, 300, 350, 400, 450],
+        [-750, -700, -650, -600, 600, 650, 700, 750] ]
+    alphas = np.array( alphas_list[cs.pulse_combination_number] )
+    num_filters = alphas.size
+    
+    # create the spectral filters in a list
+    spectral_filters = [ 
+        ( lambda omega, cur_alpha=alphas[i]: np.exp(0.5j*cur_alpha*omega**2) )
+        for i in range(num_filters)
+        ]
+    
+    # return the results: the filters and some extra information for retrieval
+    return (spectral_filters, alphas)
+    
+
+
 
 def create_FROG_spectral_filters():
     # define the parameters of the phase-cycled FROG
@@ -147,6 +278,8 @@ def create_FROG_spectral_filters():
     return (spectral_filters,)
 
     
+    
+    
 def create_fitMIIPS_spectral_filters():
     # define the parameters of MIIPS
     num_filters = 128
@@ -164,6 +297,8 @@ def create_fitMIIPS_spectral_filters():
     return (spectral_filters, alpha, gamma, deltas)
     
     
+
+
 
 def create_ChirpScan_spectral_filters():
     # define the parameters of ChirpScan
@@ -194,6 +329,8 @@ def create_ChirpScan_spectral_filters():
   
 # compute the mapping function from nJ per inverse femtosecond to CCD counts
 ccd_map_function, spec_lambda = cs.compute_ccd_mapping_function(2*cs.central_f)
+# plt.plot(spec_lambda)
+# plt.show()
 
 # compute the spectral filter due to BBO thickness
 rms_spot_radius = 50000 # in nm; four times this is the D4sigma spot size
@@ -201,8 +338,21 @@ BBO_spectral_filter = shg_spectral_filter.spectral_filter(
                         2*np.pi*(2*cs.central_f+cs.f), 
                         2*np.pi*cs.central_f,
                         rms_spot_radius) 
-# plt.plot(2*cs.central_f+cs.f, np.abs(BBO_spectral_filter))
-# plt.show()
+plt.figure(figsize=(3.25, 1.5))
+my_font_size = 6.5
+matplotlib.rc('xtick', labelsize=my_font_size)
+matplotlib.rc('ytick', labelsize=my_font_size)
+plt.plot(trunc_function(cs.c/(2*cs.central_f+cs.f)), np.abs(BBO_spectral_filter)**2)
+plt.xlim(np.amin(spec_lambda), np.amax(spec_lambda))
+plt.xlabel('Wavelength (nm)', fontsize=my_font_size)
+plt.ylabel('Intensity (a.u.)', fontsize=my_font_size)
+# skip the y-axis labels
+plt.gca().yaxis.set_ticklabels([])
+# hide the y-axis ticks too
+plt.gca().tick_params(axis='y', which='both', left='off', right='off')
+plt.tight_layout(pad=0.2)
+plt.savefig('BBO_spectral_filter.pdf', dpi=600)
+#plt.show()
 
 
 def create_data(spectral_filters_tuple, num_shots):
@@ -257,7 +407,7 @@ def create_data(spectral_filters_tuple, num_shots):
 
     # fit a spline to resample back into the frequency domain
     N = 256
-    dt_resampled = 2.5 # in fs
+    dt_resampled = 2.3 # in fs
     f_resampled = np.fft.fftfreq(N, dt_resampled)
     # f_resampled = np.linspace(np.amin(cs.c/spec_lambda)-2*cs.central_f, np.amax(cs.c/spec_lambda)-2*cs.central_f, N)
     SHG_resampled = np.zeros( (num_filters, N) )
@@ -386,14 +536,15 @@ def create_MIIPS_compensation(prev_compensation, data_tuple, filter_tuple):
     # assure finiteness
     all_maxima[np.logical_not(np.isfinite(all_maxima))] = 0.0
     
-    # # show the stuff to the user
-    # plt.imshow(np.flipud(np.fft.fftshift(SHG_resampled, axes=1).T), aspect='auto', interpolation='nearest',
-        # extent = (np.amin(deltas) - 0.5*d_delta, np.amax(deltas) + 0.5*d_delta,
-                    # np.amin(f_resampled) - 0.5*df, np.amax(f_resampled) + 0.5*df))
-    # plt.plot(all_maxima, f_resampled, '.')
-    # plt.xlim(0, 2*np.pi)
-    # plt.ylim(-0.15, 0.2)
-    # plt.show()
+    ## show the stuff to the user
+    #plt.figure()
+    #plt.imshow(np.flipud(np.fft.fftshift(SHG_resampled, axes=1).T), aspect='auto', interpolation='nearest',
+        #extent = (np.amin(deltas) - 0.5*d_delta, np.amax(deltas) + 0.5*d_delta,
+                    #np.amin(f_resampled) - 0.5*df, np.amax(f_resampled) + 0.5*df))
+    #plt.plot(all_maxima, f_resampled, '.')
+    #plt.xlim(0, 2*np.pi)
+    #plt.ylim(-0.15, 0.2)
+    #plt.show()
     
     # compute the second-derivative-of-phase estimate
     phi_pp_estimate = np.fft.fftshift( 0.5 * alpha * gamma**2 * (np.sin(gamma*(0.5*omega) - all_maxima[:,0]) + np.sin(gamma*(0.5*omega) - all_maxima[:,1])) )
@@ -410,12 +561,13 @@ def create_MIIPS_compensation(prev_compensation, data_tuple, filter_tuple):
     phi_p_estimate = scipy.integrate.cumtrapz(phi_pp_estimate, omega_straight, initial=0.0)
     phi_p_estimate[:] -= phi_p_estimate[np.argmin(np.abs(omega_straight))]
     
-    # # show the user the measured group-delay
-    # plt.plot(omega_straight/(2*np.pi), phi_p_estimate)
-    # plt.plot(cs.f, cs.spectral_gd)
-    # # plt.ylim(-15, 15)
-    # plt.xlim(-2.5*cs.bandwidth_f, 2.5*cs.bandwidth_f)
-    # plt.show()
+    ## show the user the measured group-delay
+    #plt.figure()
+    #plt.plot(omega_straight/(2*np.pi), phi_p_estimate)
+    #plt.plot(cs.f, cs.spectral_gd)
+    ## plt.ylim(-15, 15)
+    #plt.xlim(-2.5*cs.bandwidth_f, 2.5*cs.bandwidth_f)
+    #plt.show()
     
     # compute the phase estimate
     phi_estimate = scipy.integrate.cumtrapz(phi_p_estimate, omega_straight, initial=0.0)
@@ -428,6 +580,136 @@ def create_MIIPS_compensation(prev_compensation, data_tuple, filter_tuple):
     return lambda input_omega: np.exp(-1j*phi_spline(input_omega)) * prev_compensation(input_omega)
     
     
+
+
+
+
+def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
+    # extract the various inputs
+    SHG_resampled = data_tuple[0]
+    f_resampled = data_tuple[1]
+    df = f_resampled[1] - f_resampled[0]
+    omega = 2*np.pi*f_resampled
+    N = f_resampled.size
+    big_variable_interval_list = filter_tuple[1]
+    big_reference_interval_list = filter_tuple[2]
+    big_tau_list = filter_tuple[3]
+    tau_list = filter_tuple[4]
+    left_f_boundaries = filter_tuple[5]
+    right_f_boundaries = filter_tuple[6]
+    
+    # make a plot of the data
+    left_SHG_intensity = np.zeros( (tau_list.size, (left_f_boundaries.size+1)/2) )
+    left_intervals = np.arange((left_f_boundaries.size-1)/2 + 1)
+    right_SHG_intensity = np.zeros( (tau_list.size, (left_f_boundaries.size+1)/2) )
+    right_intervals = np.arange((left_f_boundaries.size-1)/2, left_f_boundaries.size+1)
+    for i in range(SHG_resampled.shape[0]):
+        cur_tau = big_tau_list[i]
+        #print 'cur_tau = ' + str(cur_tau)
+        which_tau = int(np.flatnonzero(cur_tau == tau_list))
+        #print 'which_tau = ' + str(which_tau)
+        cur_interval = big_variable_interval_list[i]
+        cur_reference_interval = big_reference_interval_list[i]
+        if(cur_reference_interval < (left_f_boundaries.size-1)/2):
+            right_index = int(np.flatnonzero(cur_interval == right_intervals))
+            right_SHG_intensity[which_tau, right_index] = np.sum(SHG_resampled[i, :])
+        else:
+            left_index = int(np.flatnonzero(cur_interval == left_intervals))
+            left_SHG_intensity[which_tau, left_index] = np.sum(SHG_resampled[i, :])
+    
+    # plot it
+    plt.figure()
+    plt.imshow(np.log(left_SHG_intensity), aspect='auto', interpolation='nearest')
+    plt.figure()
+    plt.imshow(np.log(right_SHG_intensity), aspect='auto', interpolation='nearest')
+    plt.show()
+    
+    # create a list of group-delays for the left side
+    left_measured_gds = np.zeros( (left_intervals.size,) )
+    for i in range(left_measured_gds.size):
+        # find the central peak values
+        big_cutoff = 0.5*(np.amax(left_SHG_intensity[:, i]) + np.amin(left_SHG_intensity[:, i]))
+        big_values = left_SHG_intensity[:, i] > big_cutoff
+        # make sure it doesn't go to the edges
+        assert(not big_values[0])
+        assert(not big_values[-1])
+        # map out the central range of that peak
+        biggest_value = np.argmax(left_SHG_intensity[:, i])
+        left_peak = biggest_value
+        while big_values[left_peak-1]:
+            left_peak -= 1
+        right_peak = biggest_value+1
+        while big_values[right_peak]:
+            right_peak += 1
+        # fit a polynomial to that central range of the peak
+        fitted_poly = np.polyfit(tau_list[left_peak:right_peak], left_SHG_intensity[left_peak:right_peak, i], 4)
+        plt.figure()
+        plt.plot(tau_list, left_SHG_intensity[:, i])
+        plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
+        plt.show()
+        fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
+        best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
+        left_measured_gds[i] = best_gd.x
+    
+    # create a list of group-delays for the right side
+    right_measured_gds = np.zeros( (right_intervals.size,) )
+    for i in range(right_measured_gds.size):
+        # find the central peak values
+        big_cutoff = 0.5*(np.amax(right_SHG_intensity[:, i]) + np.amin(right_SHG_intensity[:, i]))
+        big_values = right_SHG_intensity[:, i] > big_cutoff
+        # make sure it doesn't go to the edges
+        assert(not big_values[0])
+        assert(not big_values[-1])
+        # map out the central range of that peak
+        biggest_value = np.argmax(right_SHG_intensity[:, i])
+        left_peak = biggest_value
+        while big_values[left_peak-1]:
+            left_peak -= 1
+        right_peak = biggest_value+1
+        while big_values[right_peak]:
+            right_peak += 1
+        # fit a polynomial to that central range of the peak
+        fitted_poly = np.polyfit(tau_list[left_peak:right_peak], right_SHG_intensity[left_peak:right_peak, i], 4)
+        plt.figure()
+        plt.plot(tau_list, right_SHG_intensity[:, i])
+        plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
+        plt.show()
+        fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
+        best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
+        right_measured_gds[i] = best_gd.x
+    
+    # interpolate that
+    omega_centers = 2*np.pi*0.5*(left_f_boundaries[1:-1] + right_f_boundaries[1:-1])
+    # combine the two GD measurements, and shift them so that the center is 0 for both sides
+    measured_gds = np.zeros( (left_f_boundaries.size,) )
+    measured_gds[:left_measured_gds.size] = left_measured_gds - left_measured_gds[-1]
+    measured_gds[left_measured_gds.size:] = right_measured_gds - right_measured_gds[0]
+    # interpolate the measured GDs
+    interp_gd = scipy.interpolate.interp1d(omega_centers, measured_gds[1:-1])
+    omega_fine = 2*np.pi*np.linspace(left_f_boundaries[1], right_f_boundaries[-1], 1024)
+    # re-shift them to center appropriately
+    gd_fine = interp_gd(omega_fine) - interp_gd(2*np.pi*cs.central_f)
+    
+    # show the user the measured group-delay
+    plt.figure()
+    plt.plot(omega_fine/(2*np.pi), gd_fine)
+    plt.plot(cs.f, cs.spectral_gd)
+    # plt.ylim(-15, 15)
+    plt.xlim(-2.5*cs.bandwidth_f, 2.5*cs.bandwidth_f)
+    plt.show()
+    
+    # compute the phase estimate
+    phi_estimate = scipy.integrate.cumtrapz(gd_fine, omega_fine, initial=0.0)
+    phi_estimate[:] -= phi_estimate[np.argmin(np.abs(omega_fine))]
+    
+    # create a phase-estimate spline
+    phi_spline = scipy.interpolate.interp1d(omega_fine, phi_estimate, bounds_error=False, fill_value=0.0)
+    
+    # return the compensation function
+    return lambda input_omega: np.exp(-1j*phi_spline(input_omega)) * prev_compensation(input_omega)
+
+
+
 
 
 def analyze_MIIPS(in_compensation, data_tuple):
@@ -698,7 +980,7 @@ def analyze_general_Fourier(data_tuple, filters_tuple, num_basin_hops, smart_sta
     best_E[:] *= np.exp(2*np.pi*1j*f_resampled*best_tau_result.x)
     
     # smooth best_E in the frequency-domain; this is multiplying by a filter in the time domain
-    fft_filter = np.exp( -np.power(np.abs(t_resampled / 70), 4) )
+    fft_filter = np.exp( -np.power(np.abs(t_resampled / 75), 4) )
     best_E = np.fft.fft( fft_filter * np.fft.ifft(best_E) )
     
     # fftshift the results
@@ -745,14 +1027,17 @@ def analyze_general_Fourier(data_tuple, filters_tuple, num_basin_hops, smart_sta
 # This is the section for creating figures
 
 def create_figure(f, group_delays, file_name):
-    # find the percentiles
-    percentiles_9010 = np.percentile(group_delays, (90, 10), axis=0)
-    percentiles_7030 = np.percentile(group_delays, (70, 30), axis=0)
-        
-    # here's the colors for plotting
-    color_9010 = (0.8, 0.9, 1.0)
-    color_7030 = (0.6, 0.8, 1.0)
-    color_true = 'r'
+    # interpolate to wavelength (nm)
+    # first define the plotting points
+    range_PHz = np.array([(-1.1*cs.bandwidth_f+cs.central_f), (1.25*cs.bandwidth_f+cs.central_f)])
+    range_nm = cs.c / range_PHz
+    plotting_nm = np.linspace(range_nm[0], range_nm[1], 256)
+    plotting_PHz = cs.c / plotting_nm
+    
+    # now actually do the interpolation
+    interp_true = scipy.interpolate.interp1d(cs.f+cs.central_f, cs.spectral_gd)
+    interp_measured = [scipy.interpolate.interp1d(f+cs.central_f, group_delays[i, :]) for i in range(group_delays.shape[0])]
+    plotting_gd_difference = interp_true(plotting_PHz) - np.array([interp_measured[i](plotting_PHz) for i in range(group_delays.shape[0])])
 
     # create the figure
     plt.figure(figsize=(3.25, 2.5))
@@ -760,47 +1045,32 @@ def create_figure(f, group_delays, file_name):
     matplotlib.rc('xtick', labelsize=my_font_size)
     matplotlib.rc('ytick', labelsize=my_font_size)
     # some plotting ranges for the different pulse-combination numbers
-    view_minimum = [ -40, -40, -10, -40] # in fs
-    view_maximum = [ 40, 40, 10, 50] # in fs
+    view_minimum = [ -4, -4, -4, -4] # in fs
+    view_maximum = [ 4, 4, 4, 4] # in fs
     # view_minimum = -10 # in fs
     # view_maximum = 10 # in fs
-
-    # shade a couple of areas
-    plt.fill_between(1000*(f+cs.central_f), percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
-    plt.fill_between(1000*(f+cs.central_f), percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
     
-    # plot the true group-delay
-    plt.plot(1000*(cs.f+cs.central_f), cs.spectral_gd, color_true)
+    # actually make the plot now
+    plt.plot(plotting_nm, plotting_gd_difference.T, linewidth=0.5)
+    # plt.plot(plotting_nm, 0*plotting_nm, 'k--', linewidth=0.5)
     
     # a few more details
     # plt.ylim(view_minimum, view_maximum) 
     plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
-    plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-    plt.xlim(1000*(-1.1*cs.bandwidth_f+cs.central_f), 1000*(1.25*cs.bandwidth_f+cs.central_f))
-    plt.xlabel('Frequency (THz)', fontsize=my_font_size)
-
-    # add the legend
-    # create not-drawn proxies compatible with "legend"
-    p1 = plt.Rectangle((0, 0), 1, 1, linewidth=0.0, edgecolor=color_9010, facecolor=color_9010)
-    p2 = plt.Rectangle((0, 0), 1, 1, linewidth=0.0, edgecolor=color_7030, facecolor=color_7030)
-    # another proxy (the one fill_between call corrupts everything)
-    p3 = plt.Line2D((0,), (1,), color=color_true)
-    plt.legend(
-        [p3, p2, p1], 
-        ['true spectral group-delay', '30$^{\mathrm{\mathsf{th}}}$ to 70$^{\mathrm{\mathsf{th}}}$ percentiles', '10$^{\mathrm{\mathsf{th}}}$ to 90$^{\mathrm{\mathsf{th}}}$ percentiles'], 
-        fontsize=my_font_size,
-        loc='lower right')
+    plt.ylabel('Retrieved group-delay error (fs)', fontsize=my_font_size)
+    plt.xlim(range_nm[1], range_nm[0])
+    plt.xlabel('Wavelength (nm)', fontsize=my_font_size)
 
     # rearrange the plot to be nicely spaced
-    plt.tight_layout()
+    plt.tight_layout(pad=0.1)
     
     # save the plot
     plt.savefig(file_name, dpi=600)
     # plt.show()
 
-    
-    
-def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name):
+
+
+def create_tiled_figure(list_f, list_group_delays, list_method_labels, file_name):
         
     # here's the colors for plotting
     color_9010 = (0.8, 0.9, 1.0)
@@ -808,55 +1078,64 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
     color_true = 'r'
     
     # some plotting ranges for the different pulse-combination numbers
-    view_minimum = [ -40, -40, -15, -50] # in fs
-    view_maximum = [ 30, 30, 10, 50] # in fs
+    view_minimum = [ -9, -9, -7, -9] # in fs
+    view_maximum = [ 28, 28, 9, 39] # in fs
 
     # create the figure
-    plt.figure(figsize=(5.75, 5.5))
-    my_font_size = 7
+    plt.figure(figsize=(6.5, 3.5))
+    my_font_size = 6.5 
     matplotlib.rc('xtick', labelsize=my_font_size)
     matplotlib.rc('ytick', labelsize=my_font_size)
 
-    for which_plot in range(6):
+    for which_plot in range(len(list_f)):
         # go to the current subplot
-        cur_subplot = plt.subplot(3, 2, which_plot+1)
+        cur_plot_ax = plt.subplot(3, 3, which_plot+1)
         
         # find the percentiles
         percentiles_9010 = np.percentile(list_group_delays[which_plot], (90, 10), axis=0)
         percentiles_7030 = np.percentile(list_group_delays[which_plot], (70, 30), axis=0)
 
         # shade a couple of areas
-        plt.fill_between(1000*(list_f[which_plot]+cs.central_f), percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
-        plt.fill_between(1000*(list_f[which_plot]+cs.central_f), percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
+        plt.fill_between(cs.c/(list_f[which_plot]+cs.central_f), percentiles_9010[0], percentiles_9010[1], lw=0.0, edgecolor=color_9010, facecolor=color_9010)
+        plt.fill_between(cs.c/(list_f[which_plot]+cs.central_f), percentiles_7030[0], percentiles_7030[1], lw=0.0, edgecolor=color_7030, facecolor=color_7030)
         
         # plot the true group-delay
-        plt.plot(1000*(cs.f+cs.central_f), cs.spectral_gd, color_true)
+        plt.plot(trunc_function(cs.c/(cs.f+cs.central_f)), cs.spectral_gd, color_true, linewidth=0.5)
+        
+        # put on the vertical region of interest lines
+        plt.plot([ROI_line1[cs.pulse_combination_number], ROI_line1[cs.pulse_combination_number]], [-1e3, 1e3], 'g', linewidth=0.5)
+        plt.plot([ROI_line2[cs.pulse_combination_number], ROI_line2[cs.pulse_combination_number]], [-1e3, 1e3], 'g', linewidth=0.5)
         
         # a few more details
         plt.ylim(view_minimum[cs.pulse_combination_number], view_maximum[cs.pulse_combination_number]) 
-        if(np.mod(which_plot, 2) == 0):
-            plt.ylabel('Spectral group-delay (fs)', fontsize=my_font_size)
-        plt.xlim(1000*(-1.05*cs.bandwidth_f+cs.central_f), 1000*(1.25*cs.bandwidth_f+cs.central_f))
-        if(which_plot >= 4):
-            plt.xlabel('Frequency (THz)', fontsize=my_font_size)
+        if(np.mod(which_plot, 3) == 0):
+            plt.ylabel('group-delay (fs)', fontsize=my_font_size)
+        else:
+            cur_plot_ax.yaxis.set_ticklabels([])
+        plt.xlim(526, 760) # in nm
+        # plt.xlim(1000*(-1.05*cs.bandwidth_f+cs.central_f), 1000*(1.25*cs.bandwidth_f+cs.central_f))
+        if(which_plot >= 6):
+            plt.xlabel('Wavelength (nm)', fontsize=my_font_size)
+        else:
+            cur_plot_ax.xaxis.set_ticklabels([])
 
-        # add the legend
-        # create not-drawn proxies compatible with "legend"
-        p1 = plt.Rectangle((0, 0), 1, 1, linewidth=0.0, edgecolor=color_9010, facecolor=color_9010)
-        p2 = plt.Rectangle((0, 0), 1, 1, linewidth=0.0, edgecolor=color_7030, facecolor=color_7030)
-        # another proxy (the one fill_between call corrupts everything)
-        p3 = plt.Line2D((0,), (1,), color=color_true)
-        plt.legend(
-            [p3, p2, p1], 
-            ['true spectral group-delay', '30$^{\mathrm{\mathsf{th}}}$ to 70$^{\mathrm{\mathsf{th}}}$ percentiles', '10$^{\mathrm{\mathsf{th}}}$ to 90$^{\mathrm{\mathsf{th}}}$ percentiles'], 
-            fontsize=my_font_size,
-            loc='lower right')
+        # # add the legend
+        # # create not-drawn proxies compatible with "legend"
+        # p1 = plt.Rectangle((0, 0), 1, 1, linewidth=0.0, edgecolor=color_9010, facecolor=color_9010)
+        # p2 = plt.Rectangle((0, 0), 1, 1, linewidth=0.0, edgecolor=color_7030, facecolor=color_7030)
+        # # another proxy (the one fill_between call corrupts everything)
+        # p3 = plt.Line2D((0,), (1,), color=color_true)
+        # plt.legend(
+            # [p3, p2, p1], 
+            # ['true spectral group-delay', '30$^{\mathrm{\mathsf{th}}}$ to 70$^{\mathrm{\mathsf{th}}}$ percentiles', '10$^{\mathrm{\mathsf{th}}}$ to 90$^{\mathrm{\mathsf{th}}}$ percentiles'], 
+            # fontsize=my_font_size,
+            # loc='lower right')
         
         # add a label
-        plt.text(x=0.03, y=0.94, s=list_method_names[which_plot], horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = cur_subplot.transAxes )
+        plt.text(x=0.04, y=0.93, s=list_method_labels[which_plot], horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = cur_plot_ax.transAxes )
 
     # rearrange the plot to be nicely spaced
-    plt.tight_layout()
+    plt.tight_layout(pad=0.2)
     
     # save the plot
     plt.savefig(file_name, dpi=600)
@@ -865,8 +1144,27 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
 
     
     
+def measured_error(f, group_delays):
+    # interpolate to wavelength (nm)
+    # first define the plotting points
+    range_PHz = np.array([(-1.1*cs.bandwidth_f+cs.central_f), (1.25*cs.bandwidth_f+cs.central_f)])
+    range_nm = cs.c / range_PHz
+    plotting_nm = np.linspace(range_nm[0], range_nm[1], 256)
+    plotting_PHz = cs.c / plotting_nm
     
+    # now actually do the interpolation
+    interp_true = scipy.interpolate.interp1d(cs.f+cs.central_f, cs.spectral_gd)
+    interp_measured = [scipy.interpolate.interp1d(f+cs.central_f, group_delays[i, :]) for i in range(group_delays.shape[0])]
+    plotting_gd_difference = interp_true(plotting_PHz) - np.array([interp_measured[i](plotting_PHz) for i in range(group_delays.shape[0])])
     
+    # region of interest?
+    ROI_mask = np.logical_and(plotting_nm > ROI_line1[cs.pulse_combination_number], plotting_nm < ROI_line2[cs.pulse_combination_number])
+
+    # now we can compute the mean absolute error
+    # answer = np.mean(np.abs(plotting_gd_difference[:, ROI_mask]))
+    # or the RMS error
+    answer = np.sqrt(np.mean(plotting_gd_difference[:, ROI_mask]**2))
+    return answer
     
     
     
@@ -888,146 +1186,299 @@ def create_tiled_figure(list_f, list_group_delays, list_method_names, file_name)
 # This is the section that runs the simulations
 
 # number of times to run every method
-num_iterations = 120
+num_iterations = 24
+
+
+
+def shots_string(num_shots):
+    if(num_shots < 1000):
+        return str(round_sig(num_shots))
+    else:
+        return str(round_sig(num_shots/1000))
 
 
 
 
-# SPIDER first
-SPIDER_filters = create_SPIDER_spectral_filters()
-SPIDER_shots_list = [20000, 40000, 400000, 400000]
-num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
-def single_SPIDER_iteration(iteration_number):
-    SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
-    SPIDER_results = analyze_SPIDER(SPIDER_data, SPIDER_filters)
-    print 'finished #' + str(iteration_number) + ' of the SPIDER simulations.'
-    return SPIDER_results
-# do many SPIDER iterations
-SPIDER_pool = multiprocessing.Pool(processes=12)
-all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
-SPIDER_f = all_SPIDER_results[0][0]
-SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
-#print 'Creating the SPIDER figure...'
-# create the SPIDER figure
-create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
+
+## SPIDER first
+#saved_SPIDER_file_name = 'SPIDER' + str(cs.pulse_combination_number) + '.npy'
+#if(os.path.exists(saved_SPIDER_file_name)):
+    #(SPIDER_f, SPIDER_gd, num_SPIDER_shots) = np.load(saved_SPIDER_file_name)
+#else:
+    #SPIDER_filters = create_SPIDER_spectral_filters()
+    #SPIDER_shots_list = [10000, 40000, 1000000, 1000000]
+    #num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
+    #def single_SPIDER_iteration(iteration_number):
+        #SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
+        #SPIDER_results = analyze_SPIDER(SPIDER_data, SPIDER_filters)
+        #print 'finished #' + str(iteration_number) + ' of the SPIDER simulations.'
+        #return SPIDER_results
+    ## do many SPIDER iterations
+    #SPIDER_pool = multiprocessing.Pool(processes=12)
+    #all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
+    #SPIDER_f = all_SPIDER_results[0][0]
+    #SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
+    #np.save(saved_SPIDER_file_name, (SPIDER_f, SPIDER_gd, num_SPIDER_shots))
+##print 'Creating the SPIDER figure...'
+## create the SPIDER figure
+#create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
+#SPIDER_measured_error = measured_error(SPIDER_f, SPIDER_gd)
+#SPIDER_label = 'SPIDER; ' + shots_string(num_SPIDER_shots) + ' shots; err ' + str(round_sig(SPIDER_measured_error)) + ' fs'
 
 
-# now MIIPS
-MIIPS_filters = create_MIIPS_spectral_filters()
-MIIPS_shots_per_iteration_list = [5120, 5120, 40960, 40960]
-num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
-num_MIIPS_iterations = 4
-def single_MIIPS_solution(iteration_number):
-    MIIPS_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
-    for i in range(num_MIIPS_iterations):
-        # figure out what the current filters are
-        cur_filters = [
-            ( lambda omega, cur_filter=MIIPS_filters[0][i]: cur_filter(omega) * MIIPS_compensation(omega) )
-            for i in range(len(MIIPS_filters[0]))]
-        # take some MIIPS data
-        cur_MIIPS_data = create_data( (cur_filters,) , num_MIIPS_shots_per_iteration)
-        # set the pulse-shaper to compensate
-        MIIPS_compensation = create_MIIPS_compensation(MIIPS_compensation, cur_MIIPS_data, MIIPS_filters)
-    # now look at the last version of the compensation to get the final results
-    MIIPS_results = analyze_MIIPS(MIIPS_compensation, cur_MIIPS_data)
-    print 'finished #' + str(iteration_number) + ' of the MIIPS simulations.'
-    return MIIPS_results
-# do many MIIPS solutions
-MIIPS_pool = multiprocessing.Pool(processes=12)
-all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
-MIIPS_f = all_MIIPS_results[0][0]
-MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
-# print 'Creating the MIIPS figure...'
-# create the MIIPS figure
-create_figure(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
+## now MIIPS
+#saved_MIIPS_file_name = 'MIIPS' + str(cs.pulse_combination_number) + '.npy'
+#if(os.path.exists(saved_MIIPS_file_name)):
+    #(MIIPS_f, MIIPS_gd, num_MIIPS_shots) = np.load(saved_MIIPS_file_name)
+#else:
+    #MIIPS_filters = create_MIIPS_spectral_filters()
+    #MIIPS_shots_per_iteration_list = [20480, 64*5, 81920, 81920]
+    #num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
+    #num_MIIPS_iterations = 4
+    #num_MIIPS_shots = num_MIIPS_iterations*num_MIIPS_shots_per_iteration
+    #def single_MIIPS_solution(iteration_number):
+        #MIIPS_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
+        #for i in range(num_MIIPS_iterations):
+            ## figure out what the current filters are
+            #cur_filters = [
+                #( lambda omega, cur_filter=MIIPS_filters[0][i]: cur_filter(omega) * MIIPS_compensation(omega) )
+                #for i in range(len(MIIPS_filters[0]))]
+            ## take some MIIPS data
+            #cur_MIIPS_data = create_data( (cur_filters,) , num_MIIPS_shots_per_iteration)
+            ## set the pulse-shaper to compensate
+            #MIIPS_compensation = create_MIIPS_compensation(MIIPS_compensation, cur_MIIPS_data, MIIPS_filters)
+        ## now look at the last version of the compensation to get the final results
+        #MIIPS_results = analyze_MIIPS(MIIPS_compensation, cur_MIIPS_data)
+        #print 'finished #' + str(iteration_number) + ' of the MIIPS simulations.'
+        #return MIIPS_results
+    ## do many MIIPS solutions
+    #MIIPS_pool = multiprocessing.Pool(processes=12)
+    #all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
+    ##all_MIIPS_results = map(single_MIIPS_solution, range(num_iterations))
+    #MIIPS_f = all_MIIPS_results[0][0]
+    #MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
+    #np.save(saved_MIIPS_file_name, (MIIPS_f, MIIPS_gd, num_MIIPS_shots))
+## print 'Creating the MIIPS figure...'
+## create the MIIPS figure
+#create_figure(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
+#MIIPS_measured_error = measured_error(MIIPS_f, MIIPS_gd)
+#MIIPS_label = 'MIIPS; ' + shots_string(num_MIIPS_shots) + ' shots; err ' + str(round_sig(MIIPS_measured_error)) + ' fs'
+
+
+# now MIIPS-S
+saved_MIIPS_S_file_name = 'MIIPS_S_' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_MIIPS_S_file_name)):
+    (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots) = np.load(saved_MIIPS_S_file_name)
+else:
+    MIIPS_S_filters = create_MIIPS_S_spectral_filters()
+    MIIPS_S_shots_per_shape = int(1e6)
+    num_MIIPS_S_shots_per_iteration = MIIPS_S_shots_per_shape * len(MIIPS_S_filters[0])
+    num_MIIPS_S_iterations = 2
+    num_MIIPS_S_shots = num_MIIPS_S_iterations*num_MIIPS_S_shots_per_iteration
+    def single_MIIPS_S_solution(iteration_number):
+        MIIPS_S_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
+        for i in range(num_MIIPS_S_iterations):
+            # figure out what the current filters are
+            cur_filters = [
+                ( lambda omega, cur_filter=MIIPS_S_filters[0][i]: cur_filter(omega) * MIIPS_S_compensation(omega) )
+                for i in range(len(MIIPS_S_filters[0]))]
+            # take some MIIPS-S data
+            cur_MIIPS_S_data = create_data( (cur_filters,) , num_MIIPS_S_shots_per_iteration)
+            # set the pulse-shaper to compensate
+            MIIPS_S_compensation = create_MIIPS_S_compensation(MIIPS_S_compensation, cur_MIIPS_S_data, MIIPS_S_filters)
+        # now look at the last version of the compensation to get the final results
+        MIIPS_S_results = analyze_MIIPS(MIIPS_S_compensation, cur_MIIPS_S_data)
+        print 'finished #' + str(iteration_number) + ' of the MIIPS-S simulations.'
+        return MIIPS_S_results
+    # do many MIIPS-S solutions
+    #MIIPS_S_pool = multiprocessing.Pool(processes=12)
+    #all_MIIPS_S_results = MIIPS_S_pool.map(single_MIIPS_S_solution, range(num_iterations))
+    all_MIIPS_S_results = map(single_MIIPS_S_solution, range(num_iterations))
+    MIIPS_S_f = all_MIIPS_S_results[0][0]
+    MIIPS_S_gd = np.array([ all_MIIPS_S_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_MIIPS_file_name, (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots))
+# print 'Creating the MIIPS-S figure...'
+# create the MIIPS-S figure
+create_figure(MIIPS_S_f, MIIPS_S_gd, 'MIIPS_S.pdf')
+MIIPS_S_measured_error = measured_error(MIIPS_S_f, MIIPS_S_gd)
+MIIPS_S_label = 'MIIPS-S; ' + shots_string(num_MIIPS_S_shots) + ' shots; err ' + str(round_sig(MIIPS_S_measured_error)) + ' fs'
 
 
 # CRT next
-CRT_filters = create_CRT_spectral_filters()
-num_CRT_shots = 500
-def single_CRT_iteration(iteration_number):
-    CRT_data = create_data(CRT_filters, num_CRT_shots)
-    CRT_results = analyze_CRT(CRT_data, CRT_filters)
-    print 'finished #' + str(iteration_number) + ' of the CRT simulations.'
-    return CRT_results
-# do many CRT iterations
-CRT_pool = multiprocessing.Pool(processes=12)
-all_CRT_results = CRT_pool.map(single_CRT_iteration, range(num_iterations))
-CRT_f = all_CRT_results[0][0]
-CRT_gd = np.array([ all_CRT_results[i][1] for i in range(num_iterations) ])
+saved_CRT_file_name = 'CRT' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_CRT_file_name)):
+    (CRT_f, CRT_gd, num_CRT_shots) = np.load(saved_CRT_file_name)
+else:
+    CRT_filters = create_CRT_spectral_filters()
+    CRT_shots_list = [700, 300, 700, 1000]
+    num_CRT_shots = CRT_shots_list[cs.pulse_combination_number]
+    def single_CRT_iteration(iteration_number):
+        CRT_data = create_data(CRT_filters, num_CRT_shots)
+        CRT_results = analyze_CRT(CRT_data, CRT_filters)
+        print 'finished #' + str(iteration_number) + ' of the CRT simulations.'
+        return CRT_results
+    # do many CRT iterations
+    CRT_pool = multiprocessing.Pool(processes=12)
+    all_CRT_results = CRT_pool.map(single_CRT_iteration, range(num_iterations))
+    CRT_f = all_CRT_results[0][0]
+    CRT_gd = np.array([ all_CRT_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_CRT_file_name, (CRT_f, CRT_gd, num_CRT_shots))
 # print 'Creating the CRT figure...'
 # create the CRT figure
 create_figure(CRT_f, CRT_gd, 'CRT.pdf')
+CRT_measured_error = measured_error(CRT_f, CRT_gd)
+CRT_label = 'CRT; ' + shots_string(num_CRT_shots) + ' shots; err ' + str(round_sig(CRT_measured_error)) + ' fs'
 
 
-# now SPEAR
-SPEAR_filters = create_SPEAR_spectral_filters()
-num_SPEAR_shots = 500
-def single_SPEAR_iteration(iteration_number):
-    SPEAR_data = create_data(SPEAR_filters, num_SPEAR_shots)
-    SPEAR_results = analyze_SPEAR(SPEAR_data, SPEAR_filters)
-    print 'finished #' + str(iteration_number) + ' of the SPEAR simulations.'
-    return SPEAR_results
-# do many SPEAR iterations
-SPEAR_pool = multiprocessing.Pool(processes=12)
-all_SPEAR_results = SPEAR_pool.map(single_SPEAR_iteration, range(num_iterations))
-SPEAR_f = all_SPEAR_results[0][0]
-SPEAR_gd = np.array([ all_SPEAR_results[i][1] for i in range(num_iterations) ])
-# print 'Creating the SPEAR figure...'
-# create the SPEAR figure
-create_figure(SPEAR_f, SPEAR_gd, 'SPEAR.pdf')
+# now SPEAR1
+saved_SPEAR1_file_name = 'SPEAR1' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_SPEAR1_file_name)):
+    (SPEAR1_f, SPEAR1_gd, num_SPEAR1_shots) = np.load(saved_SPEAR1_file_name)
+else:
+    SPEAR1_filters = create_SPEAR1_spectral_filters()
+    SPEAR1_shots_list = [500, 300, 500, 700]
+    num_SPEAR1_shots = SPEAR1_shots_list[cs.pulse_combination_number]
+    def single_SPEAR1_iteration(iteration_number):
+        SPEAR1_data = create_data(SPEAR1_filters, num_SPEAR1_shots)
+        SPEAR1_results = analyze_SPEAR(SPEAR1_data, SPEAR1_filters)
+        print 'finished #' + str(iteration_number) + ' of the SPEAR1 simulations.'
+        return SPEAR1_results
+    # do many SPEAR iterations
+    SPEAR1_pool = multiprocessing.Pool(processes=12)
+    all_SPEAR1_results = SPEAR1_pool.map(single_SPEAR1_iteration, range(num_iterations))
+    SPEAR1_f = all_SPEAR1_results[0][0]
+    SPEAR1_gd = np.array([ all_SPEAR1_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_SPEAR1_file_name, (SPEAR1_f, SPEAR1_gd, num_SPEAR1_shots))
+# print 'Creating the SPEAR1 figure...'
+# create the SPEAR1 figure
+create_figure(SPEAR1_f, SPEAR1_gd, 'SPEAR1.pdf')
+SPEAR1_measured_error = measured_error(SPEAR1_f, SPEAR1_gd)
+SPEAR1_label = 'SPEAR w/2 chirps; ' + shots_string(num_SPEAR1_shots) + ' shots; err ' + str(round_sig(SPEAR1_measured_error)) + ' fs'
 
 
-# and ChirpScan 
-ChirpScan_filters = create_ChirpScan_spectral_filters()
-num_ChirpScan_shots = 50
-def single_ChirpScan_iteration(iteration_number):
-    ChirpScan_data = create_data(ChirpScan_filters, num_ChirpScan_shots)
-    # ChirpScan_results = analyze_general(ChirpScan_data, ChirpScan_filters, 30, 30)
-    ChirpScan_results = analyze_general_Fourier(ChirpScan_data, ChirpScan_filters, num_basin_hops=0, smart_start=True)
-    print 'finished #' + str(iteration_number) + ' of the ChirpScan simulations.'
-    return ChirpScan_results
-# do many ChirpScan iterations
-ChirpScan_start_fitting = time.time()
-processors = 12
-ChirpScan_pool = multiprocessing.Pool(processes=12)
-all_ChirpScan_results = ChirpScan_pool.map(single_ChirpScan_iteration, range(num_iterations))
-# processors = 1
-# all_ChirpScan_results = map(single_ChirpScan_iteration, range(num_iterations))
-ChirpScan_end_fitting = time.time()
-print 'total ChirpScan time per iteration: ' + str( (ChirpScan_end_fitting - ChirpScan_start_fitting)/num_iterations )
-print 'total ChirpScan time * processors per iteration: ' + str( (ChirpScan_end_fitting - ChirpScan_start_fitting)*processors/num_iterations )
-ChirpScan_f = all_ChirpScan_results[0][0]
-ChirpScan_gd = np.array([ all_ChirpScan_results[i][1] for i in range(num_iterations) ])
-# print 'Creating the ChirpScan figure...'
-# create the ChirpScan figure
-create_figure(ChirpScan_f, ChirpScan_gd, 'ChirpScan.pdf')
+# now SPEAR2
+saved_SPEAR2_file_name = 'SPEAR2' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_SPEAR2_file_name)):
+    (SPEAR2_f, SPEAR2_gd, num_SPEAR2_shots) = np.load(saved_SPEAR2_file_name)
+else:
+    SPEAR2_filters = create_SPEAR2_spectral_filters()
+    SPEAR2_shots_list = [2000, 1200, 2000, 4000]
+    num_SPEAR2_shots = SPEAR2_shots_list[cs.pulse_combination_number]
+    def single_SPEAR2_iteration(iteration_number):
+        SPEAR2_data = create_data(SPEAR2_filters, num_SPEAR2_shots)
+        SPEAR2_results = analyze_SPEAR(SPEAR2_data, SPEAR2_filters)
+        print 'finished #' + str(iteration_number) + ' of the SPEAR2 simulations.'
+        return SPEAR2_results
+    # do many SPEAR2 iterations
+    SPEAR2_pool = multiprocessing.Pool(processes=12)
+    all_SPEAR2_results = SPEAR2_pool.map(single_SPEAR2_iteration, range(num_iterations))
+    SPEAR2_f = all_SPEAR2_results[0][0]
+    SPEAR2_gd = np.array([ all_SPEAR2_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_SPEAR2_file_name, (SPEAR2_f, SPEAR2_gd, num_SPEAR2_shots))
+# print 'Creating the SPEAR2 figure...'
+# create the SPEAR2 figure
+create_figure(SPEAR2_f, SPEAR2_gd, 'SPEAR2.pdf')
+SPEAR2_measured_error = measured_error(SPEAR2_f, SPEAR2_gd)
+SPEAR2_label = 'SPEAR w/8 chirps; ' + shots_string(num_SPEAR2_shots) + ' shots; err ' + str(round_sig(SPEAR2_measured_error)) + ' fs'
+
+
+# and ChirpScan1
+saved_ChirpScan1_file_name = 'ChirpScan1' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_ChirpScan1_file_name)):
+    (ChirpScan1_f, ChirpScan1_gd, num_ChirpScan1_shots) = np.load(saved_ChirpScan1_file_name)
+else:
+    ChirpScan1_filters = create_ChirpScan_spectral_filters()
+    num_ChirpScan1_shots = 20
+    def single_ChirpScan1_iteration(iteration_number):
+        ChirpScan1_data = create_data(ChirpScan1_filters, num_ChirpScan1_shots)
+        # ChirpScan1_results = analyze_general(ChirpScan1_data, ChirpScan1_filters, 30, 30)
+        ChirpScan1_results = analyze_general_Fourier(ChirpScan1_data, ChirpScan1_filters, num_basin_hops=0, smart_start=True)
+        print 'finished #' + str(iteration_number) + ' of the ChirpScan1 simulations.'
+        return ChirpScan1_results
+    # do many ChirpScan1 iterations
+    ChirpScan1_start_fitting = time.time()
+    processors = 12
+    ChirpScan1_pool = multiprocessing.Pool(processes=12)
+    all_ChirpScan1_results = ChirpScan1_pool.map(single_ChirpScan1_iteration, range(num_iterations))
+    # processors = 1
+    # all_ChirpScan1_results = map(single_ChirpScan1_iteration, range(num_iterations))
+    ChirpScan1_end_fitting = time.time()
+    print 'total ChirpScan1 time per iteration: ' + str( (ChirpScan1_end_fitting - ChirpScan1_start_fitting)/num_iterations )
+    print 'total ChirpScan1 time * processors per iteration: ' + str( (ChirpScan1_end_fitting - ChirpScan1_start_fitting)*processors/num_iterations )
+    ChirpScan1_f = all_ChirpScan1_results[0][0]
+    ChirpScan1_gd = np.array([ all_ChirpScan1_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_ChirpScan1_file_name, (ChirpScan1_f, ChirpScan1_gd, num_ChirpScan1_shots))
+# print 'Creating the ChirpScan1 figure...'
+# create the ChirpScan1 figure
+create_figure(ChirpScan1_f, ChirpScan1_gd, 'ChirpScan1.pdf')
+ChirpScan1_measured_error = measured_error(ChirpScan1_f, ChirpScan1_gd)
+ChirpScan1_label = 'ChirpScan; ' + shots_string(num_ChirpScan1_shots) + ' shots; err ' + str(round_sig(ChirpScan1_measured_error)) + ' fs'
+
+
+# and ChirpScan2
+saved_ChirpScan2_file_name = 'ChirpScan2' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_ChirpScan2_file_name)):
+    (ChirpScan2_f, ChirpScan2_gd, num_ChirpScan2_shots) = np.load(saved_ChirpScan2_file_name)
+else:
+    ChirpScan2_filters = create_ChirpScan_spectral_filters()
+    num_ChirpScan2_shots = 700
+    def single_ChirpScan2_iteration(iteration_number):
+        ChirpScan2_data = create_data(ChirpScan2_filters, num_ChirpScan2_shots)
+        # ChirpScan2_results = analyze_general(ChirpScan2_data, ChirpScan2_filters, 30, 30)
+        ChirpScan2_results = analyze_general_Fourier(ChirpScan2_data, ChirpScan2_filters, num_basin_hops=0, smart_start=True)
+        print 'finished #' + str(iteration_number) + ' of the ChirpScan2 simulations.'
+        return ChirpScan2_results
+    # do many ChirpScan2 iterations
+    ChirpScan2_start_fitting = time.time()
+    processors = 12
+    ChirpScan2_pool = multiprocessing.Pool(processes=12)
+    all_ChirpScan2_results = ChirpScan2_pool.map(single_ChirpScan2_iteration, range(num_iterations))
+    # processors = 1
+    # all_ChirpScan2_results = map(single_ChirpScan2_iteration, range(num_iterations))
+    ChirpScan2_end_fitting = time.time()
+    print 'total ChirpScan2 time per iteration: ' + str( (ChirpScan2_end_fitting - ChirpScan2_start_fitting)/num_iterations )
+    print 'total ChirpScan2 time * processors per iteration: ' + str( (ChirpScan2_end_fitting - ChirpScan2_start_fitting)*processors/num_iterations )
+    ChirpScan2_f = all_ChirpScan2_results[0][0]
+    ChirpScan2_gd = np.array([ all_ChirpScan2_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_ChirpScan2_file_name, (ChirpScan2_f, ChirpScan2_gd, num_ChirpScan2_shots))
+# print 'Creating the ChirpScan2 figure...'
+# create the ChirpScan2 figure
+create_figure(ChirpScan2_f, ChirpScan2_gd, 'ChirpScan2.pdf')
+ChirpScan2_measured_error = measured_error(ChirpScan2_f, ChirpScan2_gd)
+ChirpScan2_label = 'ChirpScan; ' + shots_string(num_ChirpScan2_shots) + ' shots; err ' + str(round_sig(ChirpScan2_measured_error)) + ' fs'
 
 
 # FROG next
-FROG_filters = create_FROG_spectral_filters()
-num_FROG_shots = 3500
-def single_FROG_iteration(iteration_number):
-    FROG_data = create_data(FROG_filters, num_FROG_shots)
-    # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
-    FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=0, smart_start=True)
-    print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
-    return FROG_results
-# do many FROG iterations
-FROG_start_fitting = time.time()
-processors = 12
-FROG_pool = multiprocessing.Pool(processes=processors)
-all_FROG_results = FROG_pool.map(single_FROG_iteration, range(num_iterations))
-#processors = 1
-#all_FROG_results = map(single_FROG_iteration, range(num_iterations))
-FROG_end_fitting = time.time()
-print 'total FROG time per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)/num_iterations )
-print 'total FROG time * processors per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)*processors/num_iterations )
-FROG_f = all_FROG_results[0][0]
-FROG_gd = np.array([ all_FROG_results[i][1] for i in range(num_iterations) ])
+saved_FROG_file_name = 'FROG' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_FROG_file_name)):
+    (FROG_f, FROG_gd, num_FROG_shots) = np.load(saved_FROG_file_name)
+else:
+    FROG_filters = create_FROG_spectral_filters()
+    num_FROG_shots = 700
+    def single_FROG_iteration(iteration_number):
+        FROG_data = create_data(FROG_filters, num_FROG_shots)
+        # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
+        FROG_results = analyze_general_Fourier(FROG_data, FROG_filters, num_basin_hops=0, smart_start=True)
+        print 'finished #' + str(iteration_number) + ' of the FROG simulations.'
+        return FROG_results
+    # do many FROG iterations
+    FROG_start_fitting = time.time()
+    processors = 12
+    FROG_pool = multiprocessing.Pool(processes=processors)
+    all_FROG_results = FROG_pool.map(single_FROG_iteration, range(num_iterations))
+    #processors = 1
+    #all_FROG_results = map(single_FROG_iteration, range(num_iterations))
+    FROG_end_fitting = time.time()
+    print 'total FROG time per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)/num_iterations )
+    print 'total FROG time * processors per iteration: ' + str( (FROG_end_fitting - FROG_start_fitting)*processors/num_iterations )
+    FROG_f = all_FROG_results[0][0]
+    FROG_gd = np.array([ all_FROG_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_FROG_file_name, (FROG_f, FROG_gd, num_FROG_shots))
 # print 'Creating the FROG figure...'
 # create the FROG figure
 create_figure(FROG_f, FROG_gd, 'FROG.pdf')
+FROG_measured_error = measured_error(FROG_f, FROG_gd)
+FROG_label = 'FROG; ' + shots_string(num_FROG_shots) + ' shots;  err ' + str(round_sig(FROG_measured_error)) + ' fs'
 
 
 # # direct-fitted MIIPS 
@@ -1053,9 +1504,9 @@ create_figure(FROG_f, FROG_gd, 'FROG.pdf')
 # plot the results
 print 'Creating the tiled figure...'
 create_tiled_figure(
-    [SPIDER_f, MIIPS_f, FROG_f, CRT_f, SPEAR_f, ChirpScan_f],
-    [SPIDER_gd, MIIPS_gd, FROG_gd, CRT_gd, SPEAR_gd, ChirpScan_gd],
-    ['SPIDER', 'MIIPS', 'FROG', 'CRT', 'SPEAR', 'ChirpScan'],
+    [SPIDER_f, MIIPS_f, MIIPS_S_f, FROG_f, CRT_f, SPEAR1_f, SPEAR2_f, ChirpScan1_f, ChirpScan2_f],
+    [SPIDER_gd, MIIPS_gd, MIIPS_S_gd, FROG_gd, CRT_gd, SPEAR1_gd, SPEAR2_gd, ChirpScan1_gd, ChirpScan2_gd],
+    [SPIDER_label, MIIPS_label, MIIPS_S_label, FROG_label, CRT_label, SPEAR1_label, SPEAR2_label, ChirpScan1_label, ChirpScan2_label],
     'TiledFigure' + str(cs.pulse_combination_number) + '.pdf')
 
 
@@ -1083,27 +1534,35 @@ create_tiled_figure(
     
 print 'Creating the pulse-information figure'
 # plot the temporal and spectral intensity and phase
-fig = plt.figure(figsize=(5.75, 5.0))
-my_font_size = 7
+fig = plt.figure(figsize=(6.5, 4.0))
+my_font_size = 6.5
 matplotlib.rc('xtick', labelsize=my_font_size)
 matplotlib.rc('ytick', labelsize=my_font_size)
+
+# define the vertical-line parameters
+vertical_line_spec = 'g'
+vertical_line_width = 0.5
 
 #################################################################
 #################################################################
 # add the spectral intensity and group-delay of the first pulse
 ax1 = fig.add_subplot(4, 2, 1)
-ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[0][1]/np.amax(cs.spectral_combos[0][1]), 'b:')
+ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[0][1]/np.amax(cs.spectral_combos[0][1]), 'b:')
+# add vertical lines
+ax1.plot([ROI_line1[0], ROI_line1[0]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
+ax1.plot([ROI_line2[0], ROI_line2[0]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 # ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
+ax1.xaxis.set_ticklabels([])
 ax2 = ax1.twinx()
-ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[0][0], 'r-')
-ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
+ax2.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[0][0], 'r-')
+ax2.set_xlim(510, 820) # in nm
 ax2.set_ylim(-10, 45)
 plt.yticks([0, 20, 40])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
-plt.text(x=0.04, y=0.9, s='case 1', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
+plt.text(x=0.5, y=0.9, s='case 1', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
 
 # now the temporal intensity and phase of the first pulse
 ax3 = fig.add_subplot(4, 2, 2)
@@ -1114,6 +1573,7 @@ ax3.plot(cs.t, temporal_intensity1/np.amax(temporal_intensity1), 'b:')
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
+ax3.xaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field1))
 temporal_phase[:] -= temporal_phase[np.argmin(np.abs(cs.t-0.0))]
@@ -1121,7 +1581,7 @@ temporal_phase[:] -= 0.125*cs.t
 ax4.plot(cs.t, temporal_phase, 'r-')
 ax4.set_xlim(-40, 20)
 ax4.set_ylim(-12, 2)
-plt.yticks([-10, 0])
+plt.yticks([-10, -5, 0])
 # plt.yticks([-3*np.pi, -2*np.pi, -np.pi, 0], ('-3$\mathsf{\pi}$', '-2$\mathsf{\pi}$', '-$\mathsf{\pi}$', '0'))
 ax4.set_ylabel('Phase (rad.)', fontsize=my_font_size)
 plt.text(x=0.04, y=0.9, s='case 1', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax3.transAxes )
@@ -1130,18 +1590,22 @@ plt.text(x=0.04, y=0.9, s='case 1', horizontalalignment='left', verticalalignmen
 #################################################################
 # add the spectral intensity and group-delay of the second pulse
 ax1 = fig.add_subplot(4, 2, 3)
-ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[1][1]/np.amax(cs.spectral_combos[1][1]), 'b:')
+ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[1][1]/np.amax(cs.spectral_combos[1][1]), 'b:')
+# add vertical lines
+ax1.plot([ROI_line1[1], ROI_line1[1]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
+ax1.plot([ROI_line2[1], ROI_line2[1]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 # ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
+ax1.xaxis.set_ticklabels([])
 ax2 = ax1.twinx()
-ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[1][0], 'r-')
-ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
+ax2.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[1][0], 'r-')
+ax2.set_xlim(510, 820) # in nm
 ax2.set_ylim(-10, 45)
 plt.yticks([0, 20, 40])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
-plt.text(x=0.04, y=0.9, s='case 2', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
+plt.text(x=0.3, y=0.9, s='case 2', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
 
 # now the temporal intensity and phase of the second pulse
 ax3 = fig.add_subplot(4, 2, 4)
@@ -1152,6 +1616,7 @@ ax3.plot(cs.t, temporal_intensity2/np.amax(temporal_intensity2), 'b:')
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
+ax3.xaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field2))
 temporal_phase[:] -= temporal_phase[np.argmin(np.abs(cs.t-0.0))]
@@ -1159,7 +1624,7 @@ temporal_phase[:] -= 0.125*cs.t
 ax4.plot(cs.t, temporal_phase, 'r-')
 ax4.set_xlim(-40, 20)
 ax4.set_ylim(-12, 2)
-plt.yticks([-10, 0])
+plt.yticks([-10, -5, 0])
 ax4.set_ylabel('Phase (rad.)', fontsize=my_font_size)
 plt.text(x=0.04, y=0.9, s='case 2', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax3.transAxes )
 
@@ -1167,18 +1632,22 @@ plt.text(x=0.04, y=0.9, s='case 2', horizontalalignment='left', verticalalignmen
 #################################################################
 # add the spectral intensity and group-delay of the third pulse
 ax1 = fig.add_subplot(4, 2, 5)
-ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[2][1]/np.amax(cs.spectral_combos[2][1]), 'b:')
+ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[2][1]/np.amax(cs.spectral_combos[2][1]), 'b:')
+# add vertical lines
+ax1.plot([ROI_line1[2], ROI_line1[2]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
+ax1.plot([ROI_line2[2], ROI_line2[2]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 # ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
+ax1.xaxis.set_ticklabels([])
 ax2 = ax1.twinx()
-ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[2][0], 'r-')
-ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
+ax2.plot(trunc_function(cs.c/(cs.f+cs.central_f)), cs.spectral_combos[2][0], 'r-')
+ax2.set_xlim(510, 820) # in nm
 ax2.set_ylim(-5, 12)
 plt.yticks([0, 10])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
-plt.text(x=0.04, y=0.9, s='case 3', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
+plt.text(x=0.5, y=0.9, s='case 3', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
 
 # now the temporal intensity and phase of the third pulse
 ax3 = fig.add_subplot(4, 2, 6)
@@ -1189,6 +1658,7 @@ ax3.plot(cs.t, temporal_intensity3/np.amax(temporal_intensity3), 'b:')
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
+ax3.xaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field3))
 temporal_phase[:] -= temporal_phase[np.argmin(np.abs(cs.t-0.0))]
@@ -1196,7 +1666,7 @@ temporal_phase[:] -= 0.125*cs.t
 ax4.plot(cs.t, temporal_phase, 'r-')
 ax4.set_xlim(-40, 20)
 ax4.set_ylim(-5, 1)
-plt.yticks([-4, 0])
+plt.yticks([-4, -2, 0])
 ax4.set_ylabel('Phase (rad.)', fontsize=my_font_size)
 plt.text(x=0.04, y=0.9, s='case 3', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax3.transAxes )
 
@@ -1204,18 +1674,21 @@ plt.text(x=0.04, y=0.9, s='case 3', horizontalalignment='left', verticalalignmen
 #################################################################
 # add the spectral intensity and group-delay of the fourth pulse
 ax1 = fig.add_subplot(4, 2, 7)
-ax1.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[3][1]/np.amax(cs.spectral_combos[3][1]), 'b:')
-ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
+ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[3][1]/np.amax(cs.spectral_combos[3][1]), 'b:')
+# add vertical lines
+ax1.plot([ROI_line1[3], ROI_line1[3]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
+ax1.plot([ROI_line2[3], ROI_line2[3]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
+ax1.set_xlabel('Wavelength (nm)', fontsize=my_font_size)
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
 plt.yticks([0.0, 1.0])
 ax2 = ax1.twinx()
-ax2.plot(1000*(cs.f+cs.central_f), cs.spectral_combos[3][0], 'r-')
-ax2.set_xlim(1000*(-1.5*cs.bandwidth_f+cs.central_f), 1000*(1.7*cs.bandwidth_f+cs.central_f))
+ax2.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[3][0], 'r-')
+ax2.set_xlim(510, 820) # in nm
 ax2.set_ylim(-10, 45)
 plt.yticks([0, 20, 40])
 ax2.set_ylabel('Group-delay (fs)', fontsize=my_font_size)
-plt.text(x=0.04, y=0.9, s='case 4', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
+plt.text(x=0.3, y=0.9, s='case 4', horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = ax1.transAxes )
 
 # now the temporal intensity and phase of the fourth pulse
 ax3 = fig.add_subplot(4, 2, 8)
@@ -1240,7 +1713,7 @@ plt.text(x=0.04, y=0.9, s='case 4', horizontalalignment='left', verticalalignmen
 ##################################################################
 ##################################################################
 # save the plot
-fig.tight_layout()
+fig.tight_layout(pad=0.2)
 fig.savefig('PulseCharacteristics.pdf', dpi=600)
 
     

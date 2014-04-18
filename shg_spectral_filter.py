@@ -9,8 +9,8 @@ import scipy.integrate
 
 c = 299.792458 # in nm per femtosecond
 T = 10000 # in nm
-theta_deg = 35.9 # in degrees
-# theta_deg = 35.0 # in degrees
+# theta_deg = 35.9 # in degrees
+theta_deg = 42.0 # in degrees
 chi2 = 40 # in  nm*sqrt(fs/nJ)
 theta = np.pi*theta_deg/180.0 # in radians
 

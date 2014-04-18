@@ -26,7 +26,7 @@ num_points = 65536 #32768 #16384 #8192 #262144 #131072
 f, df = np.linspace(-20*bandwidth_f, 20*bandwidth_f, num_points, retstep=True)
 
 # spectral intensity (not amplitude)
-total_energy = 20 # in nanojoules
+total_energy = 1e3 #20 # in nanojoules
 # the first spectral intensity is an asymmetric Gaussian
 spectral_intensity1 = np.exp( -(f-0.6*bandwidth_f)**2/(bandwidth_f**2) ) * np.exp( -np.power( np.abs(f)/bandwidth_f, 3 ) )
 __intensity_integral1 = scipy.integrate.simps(spectral_intensity1, f)
