@@ -118,9 +118,9 @@ def create_MIIPS_spectral_filters():
 
 def create_MIIPS_S_spectral_filters():
     # define the parameters of MIIPS-S
-    num_spectral_intervals_inside_ROI = 15
+    num_spectral_intervals_inside_ROI = 9
     assert(num_spectral_intervals_inside_ROI % 2 == 1)
-    tau_list = np.linspace(-200, 200, 30)
+    tau_list = np.linspace(-200, 200, 15)
     
     # create the spectral intervals
     ROI_nm = np.array([ROI_line1[cs.pulse_combination_number], ROI_line2[cs.pulse_combination_number]])
@@ -602,7 +602,10 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
     left_SHG_intensity = np.zeros( (tau_list.size, (left_f_boundaries.size+1)/2) )
     left_intervals = np.arange((left_f_boundaries.size-1)/2 + 1)
     right_SHG_intensity = np.zeros( (tau_list.size, (left_f_boundaries.size+1)/2) )
-    right_intervals = np.arange((left_f_boundaries.size-1)/2, left_f_boundaries.size+1)
+    right_intervals = np.arange((left_f_boundaries.size-1)/2, left_f_boundaries.size)
+    #plt.figure()
+    #plt.plot(left_intervals)
+    #plt.plot(right_intervals)
     for i in range(SHG_resampled.shape[0]):
         cur_tau = big_tau_list[i]
         #print 'cur_tau = ' + str(cur_tau)
@@ -617,12 +620,12 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
             left_index = int(np.flatnonzero(cur_interval == left_intervals))
             left_SHG_intensity[which_tau, left_index] = np.sum(SHG_resampled[i, :])
     
-    # plot it
-    plt.figure()
-    plt.imshow(np.log(left_SHG_intensity), aspect='auto', interpolation='nearest')
-    plt.figure()
-    plt.imshow(np.log(right_SHG_intensity), aspect='auto', interpolation='nearest')
-    plt.show()
+    ## plot it
+    #plt.figure()
+    #plt.imshow(np.log(left_SHG_intensity), aspect='auto', interpolation='nearest')
+    #plt.figure()
+    #plt.imshow(np.log(right_SHG_intensity), aspect='auto', interpolation='nearest')
+    #plt.show()
     
     # create a list of group-delays for the left side
     left_measured_gds = np.zeros( (left_intervals.size,) )
@@ -631,8 +634,12 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
         big_cutoff = 0.5*(np.amax(left_SHG_intensity[:, i]) + np.amin(left_SHG_intensity[:, i]))
         big_values = left_SHG_intensity[:, i] > big_cutoff
         # make sure it doesn't go to the edges
-        assert(not big_values[0])
-        assert(not big_values[-1])
+        if(big_values[0] or big_values[-1]):
+            plt.figure()
+            plt.plot(tau_list, left_SHG_intensity[:, i])
+            plt.show()
+            assert(not big_values[0])
+            assert(not big_values[-1])
         # map out the central range of that peak
         biggest_value = np.argmax(left_SHG_intensity[:, i])
         left_peak = biggest_value
@@ -643,10 +650,10 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
             right_peak += 1
         # fit a polynomial to that central range of the peak
         fitted_poly = np.polyfit(tau_list[left_peak:right_peak], left_SHG_intensity[left_peak:right_peak, i], 4)
-        plt.figure()
-        plt.plot(tau_list, left_SHG_intensity[:, i])
-        plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
-        plt.show()
+        #plt.figure()
+        #plt.plot(tau_list, left_SHG_intensity[:, i])
+        #plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
+        #plt.show()
         fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
         best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
         left_measured_gds[i] = best_gd.x
@@ -658,8 +665,12 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
         big_cutoff = 0.5*(np.amax(right_SHG_intensity[:, i]) + np.amin(right_SHG_intensity[:, i]))
         big_values = right_SHG_intensity[:, i] > big_cutoff
         # make sure it doesn't go to the edges
-        assert(not big_values[0])
-        assert(not big_values[-1])
+        if(big_values[0] or big_values[-1]):
+            plt.figure()
+            plt.plot(tau_list, right_SHG_intensity[:, i])
+            plt.show()
+            assert(not big_values[0])
+            assert(not big_values[-1])
         # map out the central range of that peak
         biggest_value = np.argmax(right_SHG_intensity[:, i])
         left_peak = biggest_value
@@ -682,21 +693,23 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
     omega_centers = 2*np.pi*0.5*(left_f_boundaries[1:-1] + right_f_boundaries[1:-1])
     # combine the two GD measurements, and shift them so that the center is 0 for both sides
     measured_gds = np.zeros( (left_f_boundaries.size,) )
-    measured_gds[:left_measured_gds.size] = left_measured_gds - left_measured_gds[-1]
-    measured_gds[left_measured_gds.size:] = right_measured_gds - right_measured_gds[0]
+    measured_gds[:left_measured_gds.size] = -left_measured_gds + left_measured_gds[-1]
+    assert(measured_gds[left_measured_gds.size-1] == 0)
+    measured_gds[(left_measured_gds.size-1):] = -right_measured_gds + right_measured_gds[0]
+    assert(measured_gds[left_measured_gds.size-1] == 0)
     # interpolate the measured GDs
-    interp_gd = scipy.interpolate.interp1d(omega_centers, measured_gds[1:-1])
+    interp_gd = scipy.interpolate.interp1d(omega_centers, measured_gds[1:-1], bounds_error=False, fill_value=0.0)
     omega_fine = 2*np.pi*np.linspace(left_f_boundaries[1], right_f_boundaries[-1], 1024)
     # re-shift them to center appropriately
-    gd_fine = interp_gd(omega_fine) - interp_gd(2*np.pi*cs.central_f)
+    gd_fine = interp_gd(omega_fine) - interp_gd(0.0)
     
-    # show the user the measured group-delay
-    plt.figure()
-    plt.plot(omega_fine/(2*np.pi), gd_fine)
-    plt.plot(cs.f, cs.spectral_gd)
-    # plt.ylim(-15, 15)
-    plt.xlim(-2.5*cs.bandwidth_f, 2.5*cs.bandwidth_f)
-    plt.show()
+    ## show the user the measured group-delay
+    #plt.figure()
+    #plt.plot(omega_fine/(2*np.pi), gd_fine)
+    #plt.plot(cs.f, cs.spectral_gd)
+    #plt.ylim(-50, 50)
+    #plt.xlim(-2.5*cs.bandwidth_f, 2.5*cs.bandwidth_f)
+    #plt.show()
     
     # compute the phase estimate
     phi_estimate = scipy.integrate.cumtrapz(gd_fine, omega_fine, initial=0.0)
@@ -1200,69 +1213,69 @@ def shots_string(num_shots):
 
 
 
-## SPIDER first
-#saved_SPIDER_file_name = 'SPIDER' + str(cs.pulse_combination_number) + '.npy'
-#if(os.path.exists(saved_SPIDER_file_name)):
-    #(SPIDER_f, SPIDER_gd, num_SPIDER_shots) = np.load(saved_SPIDER_file_name)
-#else:
-    #SPIDER_filters = create_SPIDER_spectral_filters()
-    #SPIDER_shots_list = [10000, 40000, 1000000, 1000000]
-    #num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
-    #def single_SPIDER_iteration(iteration_number):
-        #SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
-        #SPIDER_results = analyze_SPIDER(SPIDER_data, SPIDER_filters)
-        #print 'finished #' + str(iteration_number) + ' of the SPIDER simulations.'
-        #return SPIDER_results
-    ## do many SPIDER iterations
-    #SPIDER_pool = multiprocessing.Pool(processes=12)
-    #all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
-    #SPIDER_f = all_SPIDER_results[0][0]
-    #SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
-    #np.save(saved_SPIDER_file_name, (SPIDER_f, SPIDER_gd, num_SPIDER_shots))
-##print 'Creating the SPIDER figure...'
-## create the SPIDER figure
-#create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
-#SPIDER_measured_error = measured_error(SPIDER_f, SPIDER_gd)
-#SPIDER_label = 'SPIDER; ' + shots_string(num_SPIDER_shots) + ' shots; err ' + str(round_sig(SPIDER_measured_error)) + ' fs'
+# SPIDER first
+saved_SPIDER_file_name = 'SPIDER' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_SPIDER_file_name)):
+    (SPIDER_f, SPIDER_gd, num_SPIDER_shots) = np.load(saved_SPIDER_file_name)
+else:
+    SPIDER_filters = create_SPIDER_spectral_filters()
+    SPIDER_shots_list = [10000, 40000, 1000000, 1000000]
+    num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
+    def single_SPIDER_iteration(iteration_number):
+        SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
+        SPIDER_results = analyze_SPIDER(SPIDER_data, SPIDER_filters)
+        print 'finished #' + str(iteration_number) + ' of the SPIDER simulations.'
+        return SPIDER_results
+    # do many SPIDER iterations
+    SPIDER_pool = multiprocessing.Pool(processes=12)
+    all_SPIDER_results = SPIDER_pool.map(single_SPIDER_iteration, range(num_iterations))
+    SPIDER_f = all_SPIDER_results[0][0]
+    SPIDER_gd = np.array([ all_SPIDER_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_SPIDER_file_name, (SPIDER_f, SPIDER_gd, num_SPIDER_shots))
+#print 'Creating the SPIDER figure...'
+# create the SPIDER figure
+create_figure(SPIDER_f, SPIDER_gd, 'SPIDER.pdf')
+SPIDER_measured_error = measured_error(SPIDER_f, SPIDER_gd)
+SPIDER_label = 'SPIDER; ' + shots_string(num_SPIDER_shots) + ' shots; err ' + str(round_sig(SPIDER_measured_error)) + ' fs'
 
 
-## now MIIPS
-#saved_MIIPS_file_name = 'MIIPS' + str(cs.pulse_combination_number) + '.npy'
-#if(os.path.exists(saved_MIIPS_file_name)):
-    #(MIIPS_f, MIIPS_gd, num_MIIPS_shots) = np.load(saved_MIIPS_file_name)
-#else:
-    #MIIPS_filters = create_MIIPS_spectral_filters()
-    #MIIPS_shots_per_iteration_list = [20480, 64*5, 81920, 81920]
-    #num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
-    #num_MIIPS_iterations = 4
-    #num_MIIPS_shots = num_MIIPS_iterations*num_MIIPS_shots_per_iteration
-    #def single_MIIPS_solution(iteration_number):
-        #MIIPS_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
-        #for i in range(num_MIIPS_iterations):
-            ## figure out what the current filters are
-            #cur_filters = [
-                #( lambda omega, cur_filter=MIIPS_filters[0][i]: cur_filter(omega) * MIIPS_compensation(omega) )
-                #for i in range(len(MIIPS_filters[0]))]
-            ## take some MIIPS data
-            #cur_MIIPS_data = create_data( (cur_filters,) , num_MIIPS_shots_per_iteration)
-            ## set the pulse-shaper to compensate
-            #MIIPS_compensation = create_MIIPS_compensation(MIIPS_compensation, cur_MIIPS_data, MIIPS_filters)
-        ## now look at the last version of the compensation to get the final results
-        #MIIPS_results = analyze_MIIPS(MIIPS_compensation, cur_MIIPS_data)
-        #print 'finished #' + str(iteration_number) + ' of the MIIPS simulations.'
-        #return MIIPS_results
-    ## do many MIIPS solutions
-    #MIIPS_pool = multiprocessing.Pool(processes=12)
-    #all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
-    ##all_MIIPS_results = map(single_MIIPS_solution, range(num_iterations))
-    #MIIPS_f = all_MIIPS_results[0][0]
-    #MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
-    #np.save(saved_MIIPS_file_name, (MIIPS_f, MIIPS_gd, num_MIIPS_shots))
-## print 'Creating the MIIPS figure...'
-## create the MIIPS figure
-#create_figure(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
-#MIIPS_measured_error = measured_error(MIIPS_f, MIIPS_gd)
-#MIIPS_label = 'MIIPS; ' + shots_string(num_MIIPS_shots) + ' shots; err ' + str(round_sig(MIIPS_measured_error)) + ' fs'
+# now MIIPS
+saved_MIIPS_file_name = 'MIIPS' + str(cs.pulse_combination_number) + '.npy'
+if(os.path.exists(saved_MIIPS_file_name)):
+    (MIIPS_f, MIIPS_gd, num_MIIPS_shots) = np.load(saved_MIIPS_file_name)
+else:
+    MIIPS_filters = create_MIIPS_spectral_filters()
+    MIIPS_shots_per_iteration_list = [20480, 64*5, 81920, 81920]
+    num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
+    num_MIIPS_iterations = 4
+    num_MIIPS_shots = num_MIIPS_iterations*num_MIIPS_shots_per_iteration
+    def single_MIIPS_solution(iteration_number):
+        MIIPS_compensation = lambda omega: np.ones_like(omega) # to start, the pulse-shaper doesn't do any compensation
+        for i in range(num_MIIPS_iterations):
+            # figure out what the current filters are
+            cur_filters = [
+                ( lambda omega, cur_filter=MIIPS_filters[0][i]: cur_filter(omega) * MIIPS_compensation(omega) )
+                for i in range(len(MIIPS_filters[0]))]
+            # take some MIIPS data
+            cur_MIIPS_data = create_data( (cur_filters,) , num_MIIPS_shots_per_iteration)
+            # set the pulse-shaper to compensate
+            MIIPS_compensation = create_MIIPS_compensation(MIIPS_compensation, cur_MIIPS_data, MIIPS_filters)
+        # now look at the last version of the compensation to get the final results
+        MIIPS_results = analyze_MIIPS(MIIPS_compensation, cur_MIIPS_data)
+        print 'finished #' + str(iteration_number) + ' of the MIIPS simulations.'
+        return MIIPS_results
+    # do many MIIPS solutions
+    MIIPS_pool = multiprocessing.Pool(processes=12)
+    all_MIIPS_results = MIIPS_pool.map(single_MIIPS_solution, range(num_iterations))
+    #all_MIIPS_results = map(single_MIIPS_solution, range(num_iterations))
+    MIIPS_f = all_MIIPS_results[0][0]
+    MIIPS_gd = np.array([ all_MIIPS_results[i][1] for i in range(num_iterations) ])
+    np.save(saved_MIIPS_file_name, (MIIPS_f, MIIPS_gd, num_MIIPS_shots))
+# print 'Creating the MIIPS figure...'
+# create the MIIPS figure
+create_figure(MIIPS_f, MIIPS_gd, 'MIIPS.pdf')
+MIIPS_measured_error = measured_error(MIIPS_f, MIIPS_gd)
+MIIPS_label = 'MIIPS; ' + shots_string(num_MIIPS_shots) + ' shots; err ' + str(round_sig(MIIPS_measured_error)) + ' fs'
 
 
 # now MIIPS-S
@@ -1271,7 +1284,7 @@ if(os.path.exists(saved_MIIPS_S_file_name)):
     (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots) = np.load(saved_MIIPS_S_file_name)
 else:
     MIIPS_S_filters = create_MIIPS_S_spectral_filters()
-    MIIPS_S_shots_per_shape = int(1e6)
+    MIIPS_S_shots_per_shape = 10000000.0
     num_MIIPS_S_shots_per_iteration = MIIPS_S_shots_per_shape * len(MIIPS_S_filters[0])
     num_MIIPS_S_iterations = 2
     num_MIIPS_S_shots = num_MIIPS_S_iterations*num_MIIPS_S_shots_per_iteration
@@ -1296,7 +1309,7 @@ else:
     all_MIIPS_S_results = map(single_MIIPS_S_solution, range(num_iterations))
     MIIPS_S_f = all_MIIPS_S_results[0][0]
     MIIPS_S_gd = np.array([ all_MIIPS_S_results[i][1] for i in range(num_iterations) ])
-    np.save(saved_MIIPS_file_name, (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots))
+    np.save(saved_MIIPS_S_file_name, (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots))
 # print 'Creating the MIIPS-S figure...'
 # create the MIIPS-S figure
 create_figure(MIIPS_S_f, MIIPS_S_gd, 'MIIPS_S.pdf')
