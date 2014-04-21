@@ -16,7 +16,7 @@
 from __future__ import division
 import numpy as np
 import matplotlib
-#matplotlib.use('PDF') # this is so we don't require an X window session
+matplotlib.use('PDF') # this is so we don't require an X window session
 import matplotlib.pyplot as plt
 import commonsimulation as cs
 import shg_spectral_filter
@@ -73,7 +73,7 @@ ROI_line2 = [735, 735, 735, 735] # in nm
 def create_SPIDER_spectral_filters():
     # define the parameters of the phase-cycled SPIDER
     tau = 200 # in fs, much larger than pulse-duration
-    delta_omega_list = np.array([0.7, 0.5, 0.2, 0.13])*cs.bandwidth_f*2*np.pi
+    delta_omega_list = np.array([0.7, 0.5, 0.2, 0.12])*cs.bandwidth_f*2*np.pi
     delta_omega = delta_omega_list[cs.pulse_combination_number] # this is the spectral resolution
     phi2 = tau/delta_omega # this is the chirp of the chirped pulse
     Delta_omega = 10*delta_omega # this is the spectral width of the chirped pulse
@@ -99,7 +99,7 @@ def create_SPIDER_spectral_filters():
 def create_MIIPS_spectral_filters():
     # define the parameters of MIIPS
     num_filters = 64
-    alpha_list = np.array([30.0, 2.0, 50.0, 80.0])*np.pi
+    alpha_list = np.array([30.0, 2.0, 70.0, 120.0])*np.pi
     alpha = alpha_list[cs.pulse_combination_number] # in radians
     gamma = 4.0 # in fs
     deltas = np.linspace(0, 2*np.pi, num_filters, endpoint=False)
@@ -118,9 +118,10 @@ def create_MIIPS_spectral_filters():
 
 def create_MIIPS_S_spectral_filters():
     # define the parameters of MIIPS-S
-    num_spectral_intervals_inside_ROI = 9
+    num_spectral_intervals_inside_ROI_list = [9, 9, 15, 15]
+    num_spectral_intervals_inside_ROI = num_spectral_intervals_inside_ROI_list[cs.pulse_combination_number]
     assert(num_spectral_intervals_inside_ROI % 2 == 1)
-    tau_list = np.linspace(-200, 200, 15)
+    tau_list = np.linspace(-10*num_spectral_intervals_inside_ROI, 10*num_spectral_intervals_inside_ROI, 15)
     
     # create the spectral intervals
     ROI_nm = np.array([ROI_line1[cs.pulse_combination_number], ROI_line2[cs.pulse_combination_number]])
@@ -190,7 +191,7 @@ def create_MIIPS_S_spectral_filters():
 
 def create_CRT_spectral_filters():
     # define the parameters of CRT
-    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-600, 600] ]
+    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-1000, 1000] ]
     alphas = np.array( alphas_list[cs.pulse_combination_number] )
     num_filters = alphas.size
     
@@ -208,7 +209,7 @@ def create_CRT_spectral_filters():
 
 def create_SPEAR1_spectral_filters():
     # define the parameters of SPEAR
-    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-600, 600] ]
+    alphas_list = [ [-300, 300], [-300, 300], [-300, 300], [-1000, 1000] ]
     # alphas_list = [
         # [-400, -300, 300, 400],
         # [-400, -300, 300, 400],
@@ -235,7 +236,7 @@ def create_SPEAR2_spectral_filters():
         [-450, -400, -350, -300, 300, 350, 400, 450],
         [-450, -400, -350, -300, 300, 350, 400, 450],
         [-450, -400, -350, -300, 300, 350, 400, 450],
-        [-750, -700, -650, -600, 600, 650, 700, 750] ]
+        [-1150, -1100, -1050, -1000, 1000, 1050, 1100, 1150] ]
     alphas = np.array( alphas_list[cs.pulse_combination_number] )
     num_filters = alphas.size
     
@@ -631,66 +632,78 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
     left_measured_gds = np.zeros( (left_intervals.size,) )
     for i in range(left_measured_gds.size):
         # find the central peak values
-        big_cutoff = 0.5*(np.amax(left_SHG_intensity[:, i]) + np.amin(left_SHG_intensity[:, i]))
+        big_cutoff = (0.4*np.amax(left_SHG_intensity[:, i]) + 0.6*np.amin(left_SHG_intensity[:, i]))
         big_values = left_SHG_intensity[:, i] > big_cutoff
-        # make sure it doesn't go to the edges
-        if(big_values[0] or big_values[-1]):
-            plt.figure()
-            plt.plot(tau_list, left_SHG_intensity[:, i])
-            plt.show()
-            assert(not big_values[0])
-            assert(not big_values[-1])
         # map out the central range of that peak
         biggest_value = np.argmax(left_SHG_intensity[:, i])
         left_peak = biggest_value
-        while big_values[left_peak-1]:
+        while left_peak>0 and big_values[left_peak-1]:
             left_peak -= 1
         right_peak = biggest_value+1
-        while big_values[right_peak]:
+        while right_peak<(big_values.size) and big_values[right_peak]:
             right_peak += 1
-        # fit a polynomial to that central range of the peak
-        fitted_poly = np.polyfit(tau_list[left_peak:right_peak], left_SHG_intensity[left_peak:right_peak, i], 4)
-        #plt.figure()
-        #plt.plot(tau_list, left_SHG_intensity[:, i])
-        #plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
-        #plt.show()
-        fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
-        best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
-        left_measured_gds[i] = best_gd.x
+        # make sure it doesn't go to the edges
+        if(left_peak == biggest_value or right_peak == biggest_value+1):
+            # plt.figure()
+            # plt.plot(tau_list, left_SHG_intensity[:, i])
+            # plt.show()
+            left_measured_gds[i] = tau_list[biggest_value]
+        else:
+            # fit a polynomial to that central range of the peak
+            fitted_poly = np.polyfit(tau_list[left_peak:right_peak], left_SHG_intensity[left_peak:right_peak, i], 4)
+            # plt.figure()
+            # plt.plot(tau_list, left_SHG_intensity[:, i])
+            # plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
+            # plt.show()
+            fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
+            if(fitted_poly_minimizing(tau_list[left_peak]) > fitted_poly_minimizing(tau_list[biggest_value]) and fitted_poly_minimizing(tau_list[right_peak-1]) > fitted_poly_minimizing(tau_list[biggest_value])):
+                best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
+                left_measured_gds[i] = best_gd.x
+            else:
+                left_measured_gds[i] = tau_list[biggest_value]
     
     # create a list of group-delays for the right side
     right_measured_gds = np.zeros( (right_intervals.size,) )
     for i in range(right_measured_gds.size):
         # find the central peak values
-        big_cutoff = 0.5*(np.amax(right_SHG_intensity[:, i]) + np.amin(right_SHG_intensity[:, i]))
+        big_cutoff = (0.4*np.amax(right_SHG_intensity[:, i]) + 0.6*np.amin(right_SHG_intensity[:, i]))
         big_values = right_SHG_intensity[:, i] > big_cutoff
-        # make sure it doesn't go to the edges
-        if(big_values[0] or big_values[-1]):
-            plt.figure()
-            plt.plot(tau_list, right_SHG_intensity[:, i])
-            plt.show()
-            assert(not big_values[0])
-            assert(not big_values[-1])
         # map out the central range of that peak
         biggest_value = np.argmax(right_SHG_intensity[:, i])
         left_peak = biggest_value
-        while big_values[left_peak-1]:
+        while left_peak>0 and big_values[left_peak-1]:
             left_peak -= 1
         right_peak = biggest_value+1
-        while big_values[right_peak]:
+        while right_peak<(big_values.size) and big_values[right_peak]:
             right_peak += 1
-        # fit a polynomial to that central range of the peak
-        fitted_poly = np.polyfit(tau_list[left_peak:right_peak], right_SHG_intensity[left_peak:right_peak, i], 4)
-        plt.figure()
-        plt.plot(tau_list, right_SHG_intensity[:, i])
-        plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
-        plt.show()
-        fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
-        best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
-        right_measured_gds[i] = best_gd.x
+        # make sure it doesn't go to the edges
+        if(left_peak == biggest_value or right_peak == biggest_value+1):
+            # plt.figure()
+            # plt.plot(tau_list, right_SHG_intensity[:, i])
+            # plt.show()
+            right_measured_gds[i] = tau_list[biggest_value]
+        else: 
+            # fit a polynomial to that central range of the peak
+            fitted_poly = np.polyfit(tau_list[left_peak:right_peak], right_SHG_intensity[left_peak:right_peak, i], 4)
+            # plt.figure()
+            # plt.plot(tau_list, right_SHG_intensity[:, i])
+            # plt.plot(tau_list[left_peak:right_peak], np.polyval(fitted_poly, tau_list[left_peak:right_peak]))
+            # plt.show()
+            fitted_poly_minimizing = lambda x: -np.polyval(fitted_poly, x)
+            if(fitted_poly_minimizing(tau_list[left_peak]) > fitted_poly_minimizing(tau_list[biggest_value]) and fitted_poly_minimizing(tau_list[right_peak-1]) > fitted_poly_minimizing(tau_list[biggest_value])):
+                best_gd = scipy.optimize.minimize_scalar(fitted_poly_minimizing, bracket=(tau_list[left_peak], tau_list[biggest_value], tau_list[right_peak-1]))
+                right_measured_gds[i] = best_gd.x
+            else:
+                right_measured_gds[i] = tau_list[biggest_value]
     
     # interpolate that
-    omega_centers = 2*np.pi*0.5*(left_f_boundaries[1:-1] + right_f_boundaries[1:-1])
+    d_f = 0.5*(left_f_boundaries[2]-left_f_boundaries[1])
+    omega_centers = 2*np.pi*np.linspace(left_f_boundaries[1]-d_f, right_f_boundaries[-2]+d_f, left_f_boundaries.size)
+    # plt.figure()
+    # plt.plot(2*np.pi*left_f_boundaries)
+    # plt.plot(omega_centers)
+    # plt.plot(2*np.pi*right_f_boundaries)
+    # plt.show()
     # combine the two GD measurements, and shift them so that the center is 0 for both sides
     measured_gds = np.zeros( (left_f_boundaries.size,) )
     measured_gds[:left_measured_gds.size] = -left_measured_gds + left_measured_gds[-1]
@@ -698,8 +711,8 @@ def create_MIIPS_S_compensation(prev_compensation, data_tuple, filter_tuple):
     measured_gds[(left_measured_gds.size-1):] = -right_measured_gds + right_measured_gds[0]
     assert(measured_gds[left_measured_gds.size-1] == 0)
     # interpolate the measured GDs
-    interp_gd = scipy.interpolate.interp1d(omega_centers, measured_gds[1:-1], bounds_error=False, fill_value=0.0)
-    omega_fine = 2*np.pi*np.linspace(left_f_boundaries[1], right_f_boundaries[-1], 1024)
+    interp_gd = scipy.interpolate.interp1d(omega_centers, measured_gds, bounds_error=False, fill_value=0.0)
+    omega_fine = np.linspace(np.amin(omega_centers), np.amax(omega_centers), 1024)
     # re-shift them to center appropriately
     gd_fine = interp_gd(omega_fine) - interp_gd(0.0)
     
@@ -993,7 +1006,7 @@ def analyze_general_Fourier(data_tuple, filters_tuple, num_basin_hops, smart_sta
     best_E[:] *= np.exp(2*np.pi*1j*f_resampled*best_tau_result.x)
     
     # smooth best_E in the frequency-domain; this is multiplying by a filter in the time domain
-    fft_filter = np.exp( -np.power(np.abs(t_resampled / 75), 4) )
+    fft_filter = np.exp( -np.power(np.abs(t_resampled / 90), 4) )
     best_E = np.fft.fft( fft_filter * np.fft.ifft(best_E) )
     
     # fftshift the results
@@ -1199,15 +1212,25 @@ def measured_error(f, group_delays):
 # This is the section that runs the simulations
 
 # number of times to run every method
-num_iterations = 24
+num_iterations = 120
 
 
 
 def shots_string(num_shots):
     if(num_shots < 1000):
         return str(round_sig(num_shots))
+    elif(num_shots < 1e6):
+        kilo_shots = round_sig(num_shots/1000)
+        if(kilo_shots >= 10):
+            return str(int(kilo_shots)) + 'K'
+        else:
+            return str(kilo_shots) + 'K'
     else:
-        return str(round_sig(num_shots/1000))
+        mega_shots = round_sig(num_shots/1e6)
+        if(mega_shots >= 10):
+            return str(int(mega_shots)) + 'M'
+        else:
+            return str(mega_shots) + 'M'
 
 
 
@@ -1219,7 +1242,7 @@ if(os.path.exists(saved_SPIDER_file_name)):
     (SPIDER_f, SPIDER_gd, num_SPIDER_shots) = np.load(saved_SPIDER_file_name)
 else:
     SPIDER_filters = create_SPIDER_spectral_filters()
-    SPIDER_shots_list = [10000, 40000, 1000000, 1000000]
+    SPIDER_shots_list = [10000, 40000, 1000000, 2000000]
     num_SPIDER_shots = SPIDER_shots_list[cs.pulse_combination_number]
     def single_SPIDER_iteration(iteration_number):
         SPIDER_data = create_data(SPIDER_filters, num_SPIDER_shots)
@@ -1245,7 +1268,7 @@ if(os.path.exists(saved_MIIPS_file_name)):
     (MIIPS_f, MIIPS_gd, num_MIIPS_shots) = np.load(saved_MIIPS_file_name)
 else:
     MIIPS_filters = create_MIIPS_spectral_filters()
-    MIIPS_shots_per_iteration_list = [20480, 64*5, 81920, 81920]
+    MIIPS_shots_per_iteration_list = [20480, 64*3, 81920, 6*81920]
     num_MIIPS_shots_per_iteration = MIIPS_shots_per_iteration_list[cs.pulse_combination_number]
     num_MIIPS_iterations = 4
     num_MIIPS_shots = num_MIIPS_iterations*num_MIIPS_shots_per_iteration
@@ -1284,7 +1307,8 @@ if(os.path.exists(saved_MIIPS_S_file_name)):
     (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots) = np.load(saved_MIIPS_S_file_name)
 else:
     MIIPS_S_filters = create_MIIPS_S_spectral_filters()
-    MIIPS_S_shots_per_shape = 10000000.0
+    MIIPS_S_shots_per_shape_list = [500, 1000, 15000, 300000]
+    MIIPS_S_shots_per_shape = MIIPS_S_shots_per_shape_list[cs.pulse_combination_number]
     num_MIIPS_S_shots_per_iteration = MIIPS_S_shots_per_shape * len(MIIPS_S_filters[0])
     num_MIIPS_S_iterations = 2
     num_MIIPS_S_shots = num_MIIPS_S_iterations*num_MIIPS_S_shots_per_iteration
@@ -1304,9 +1328,9 @@ else:
         print 'finished #' + str(iteration_number) + ' of the MIIPS-S simulations.'
         return MIIPS_S_results
     # do many MIIPS-S solutions
-    #MIIPS_S_pool = multiprocessing.Pool(processes=12)
-    #all_MIIPS_S_results = MIIPS_S_pool.map(single_MIIPS_S_solution, range(num_iterations))
-    all_MIIPS_S_results = map(single_MIIPS_S_solution, range(num_iterations))
+    MIIPS_S_pool = multiprocessing.Pool(processes=12)
+    all_MIIPS_S_results = MIIPS_S_pool.map(single_MIIPS_S_solution, range(num_iterations))
+    # all_MIIPS_S_results = map(single_MIIPS_S_solution, range(num_iterations))
     MIIPS_S_f = all_MIIPS_S_results[0][0]
     MIIPS_S_gd = np.array([ all_MIIPS_S_results[i][1] for i in range(num_iterations) ])
     np.save(saved_MIIPS_S_file_name, (MIIPS_S_f, MIIPS_S_gd, num_MIIPS_S_shots))
@@ -1323,7 +1347,7 @@ if(os.path.exists(saved_CRT_file_name)):
     (CRT_f, CRT_gd, num_CRT_shots) = np.load(saved_CRT_file_name)
 else:
     CRT_filters = create_CRT_spectral_filters()
-    CRT_shots_list = [700, 300, 700, 1000]
+    CRT_shots_list = [700, 300, 900, 15000]
     num_CRT_shots = CRT_shots_list[cs.pulse_combination_number]
     def single_CRT_iteration(iteration_number):
         CRT_data = create_data(CRT_filters, num_CRT_shots)
@@ -1349,7 +1373,7 @@ if(os.path.exists(saved_SPEAR1_file_name)):
     (SPEAR1_f, SPEAR1_gd, num_SPEAR1_shots) = np.load(saved_SPEAR1_file_name)
 else:
     SPEAR1_filters = create_SPEAR1_spectral_filters()
-    SPEAR1_shots_list = [500, 300, 500, 700]
+    SPEAR1_shots_list = [500, 300, 500, 15000]
     num_SPEAR1_shots = SPEAR1_shots_list[cs.pulse_combination_number]
     def single_SPEAR1_iteration(iteration_number):
         SPEAR1_data = create_data(SPEAR1_filters, num_SPEAR1_shots)
@@ -1375,7 +1399,7 @@ if(os.path.exists(saved_SPEAR2_file_name)):
     (SPEAR2_f, SPEAR2_gd, num_SPEAR2_shots) = np.load(saved_SPEAR2_file_name)
 else:
     SPEAR2_filters = create_SPEAR2_spectral_filters()
-    SPEAR2_shots_list = [2000, 1200, 2000, 4000]
+    SPEAR2_shots_list = [2000, 1200, 2000, 60000]
     num_SPEAR2_shots = SPEAR2_shots_list[cs.pulse_combination_number]
     def single_SPEAR2_iteration(iteration_number):
         SPEAR2_data = create_data(SPEAR2_filters, num_SPEAR2_shots)
@@ -1434,7 +1458,7 @@ if(os.path.exists(saved_ChirpScan2_file_name)):
     (ChirpScan2_f, ChirpScan2_gd, num_ChirpScan2_shots) = np.load(saved_ChirpScan2_file_name)
 else:
     ChirpScan2_filters = create_ChirpScan_spectral_filters()
-    num_ChirpScan2_shots = 700
+    num_ChirpScan2_shots = 1400
     def single_ChirpScan2_iteration(iteration_number):
         ChirpScan2_data = create_data(ChirpScan2_filters, num_ChirpScan2_shots)
         # ChirpScan2_results = analyze_general(ChirpScan2_data, ChirpScan2_filters, 30, 30)
@@ -1467,7 +1491,7 @@ if(os.path.exists(saved_FROG_file_name)):
     (FROG_f, FROG_gd, num_FROG_shots) = np.load(saved_FROG_file_name)
 else:
     FROG_filters = create_FROG_spectral_filters()
-    num_FROG_shots = 700
+    num_FROG_shots = 1400
     def single_FROG_iteration(iteration_number):
         FROG_data = create_data(FROG_filters, num_FROG_shots)
         # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
