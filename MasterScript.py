@@ -1158,7 +1158,7 @@ def create_tiled_figure(list_f, list_group_delays, list_method_labels, file_name
             # loc='lower right')
         
         # add a label
-        plt.text(x=0.04, y=0.93, s=list_method_labels[which_plot], horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = cur_plot_ax.transAxes )
+        plt.text(x=0.13, y=0.93, s=list_method_labels[which_plot], horizontalalignment='left', verticalalignment='top', fontsize=my_font_size, transform = cur_plot_ax.transAxes )
 
     # rearrange the plot to be nicely spaced
     plt.tight_layout(pad=0.2)
@@ -1347,7 +1347,7 @@ if(os.path.exists(saved_CRT_file_name)):
     (CRT_f, CRT_gd, num_CRT_shots) = np.load(saved_CRT_file_name)
 else:
     CRT_filters = create_CRT_spectral_filters()
-    CRT_shots_list = [700, 300, 900, 15000]
+    CRT_shots_list = [1000, 250, 1000, 15000]
     num_CRT_shots = CRT_shots_list[cs.pulse_combination_number]
     def single_CRT_iteration(iteration_number):
         CRT_data = create_data(CRT_filters, num_CRT_shots)
@@ -1373,7 +1373,7 @@ if(os.path.exists(saved_SPEAR1_file_name)):
     (SPEAR1_f, SPEAR1_gd, num_SPEAR1_shots) = np.load(saved_SPEAR1_file_name)
 else:
     SPEAR1_filters = create_SPEAR1_spectral_filters()
-    SPEAR1_shots_list = [500, 300, 500, 15000]
+    SPEAR1_shots_list = [1000, 250, 1000, 15000]
     num_SPEAR1_shots = SPEAR1_shots_list[cs.pulse_combination_number]
     def single_SPEAR1_iteration(iteration_number):
         SPEAR1_data = create_data(SPEAR1_filters, num_SPEAR1_shots)
@@ -1390,7 +1390,7 @@ else:
 # create the SPEAR1 figure
 create_figure(SPEAR1_f, SPEAR1_gd, 'SPEAR1.pdf')
 SPEAR1_measured_error = measured_error(SPEAR1_f, SPEAR1_gd)
-SPEAR1_label = 'SPEAR w/2 chirps; ' + shots_string(num_SPEAR1_shots) + ' shots; err ' + str(round_sig(SPEAR1_measured_error)) + ' fs'
+SPEAR1_label = 'SPEAR w/2 chirps; ' + shots_string(num_SPEAR1_shots) + ' shots;\n   err ' + str(round_sig(SPEAR1_measured_error)) + ' fs'
 
 
 # now SPEAR2
@@ -1399,7 +1399,7 @@ if(os.path.exists(saved_SPEAR2_file_name)):
     (SPEAR2_f, SPEAR2_gd, num_SPEAR2_shots) = np.load(saved_SPEAR2_file_name)
 else:
     SPEAR2_filters = create_SPEAR2_spectral_filters()
-    SPEAR2_shots_list = [2000, 1200, 2000, 60000]
+    SPEAR2_shots_list = [4000, 1000, 4000, 60000]
     num_SPEAR2_shots = SPEAR2_shots_list[cs.pulse_combination_number]
     def single_SPEAR2_iteration(iteration_number):
         SPEAR2_data = create_data(SPEAR2_filters, num_SPEAR2_shots)
@@ -1416,7 +1416,7 @@ else:
 # create the SPEAR2 figure
 create_figure(SPEAR2_f, SPEAR2_gd, 'SPEAR2.pdf')
 SPEAR2_measured_error = measured_error(SPEAR2_f, SPEAR2_gd)
-SPEAR2_label = 'SPEAR w/8 chirps; ' + shots_string(num_SPEAR2_shots) + ' shots; err ' + str(round_sig(SPEAR2_measured_error)) + ' fs'
+SPEAR2_label = 'SPEAR w/8 chirps; ' + shots_string(num_SPEAR2_shots) + ' shots;\n   err ' + str(round_sig(SPEAR2_measured_error)) + ' fs'
 
 
 # and ChirpScan1
@@ -1425,7 +1425,7 @@ if(os.path.exists(saved_ChirpScan1_file_name)):
     (ChirpScan1_f, ChirpScan1_gd, num_ChirpScan1_shots) = np.load(saved_ChirpScan1_file_name)
 else:
     ChirpScan1_filters = create_ChirpScan_spectral_filters()
-    num_ChirpScan1_shots = 20
+    num_ChirpScan1_shots = 30
     def single_ChirpScan1_iteration(iteration_number):
         ChirpScan1_data = create_data(ChirpScan1_filters, num_ChirpScan1_shots)
         # ChirpScan1_results = analyze_general(ChirpScan1_data, ChirpScan1_filters, 30, 30)
@@ -1458,7 +1458,7 @@ if(os.path.exists(saved_ChirpScan2_file_name)):
     (ChirpScan2_f, ChirpScan2_gd, num_ChirpScan2_shots) = np.load(saved_ChirpScan2_file_name)
 else:
     ChirpScan2_filters = create_ChirpScan_spectral_filters()
-    num_ChirpScan2_shots = 1400
+    num_ChirpScan2_shots = 2100
     def single_ChirpScan2_iteration(iteration_number):
         ChirpScan2_data = create_data(ChirpScan2_filters, num_ChirpScan2_shots)
         # ChirpScan2_results = analyze_general(ChirpScan2_data, ChirpScan2_filters, 30, 30)
@@ -1491,7 +1491,7 @@ if(os.path.exists(saved_FROG_file_name)):
     (FROG_f, FROG_gd, num_FROG_shots) = np.load(saved_FROG_file_name)
 else:
     FROG_filters = create_FROG_spectral_filters()
-    num_FROG_shots = 1400
+    num_FROG_shots = 2100
     def single_FROG_iteration(iteration_number):
         FROG_data = create_data(FROG_filters, num_FROG_shots)
         # FROG_results = analyze_general(FROG_data, FROG_filters, 15, 15, smart_start=True)
@@ -1589,9 +1589,12 @@ ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[0][1]/np.amax(cs.spectral_
 ax1.plot([ROI_line1[0], ROI_line1[0]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 ax1.plot([ROI_line2[0], ROI_line2[0]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 # ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax1.yaxis.set_ticklabels([])
 ax1.xaxis.set_ticklabels([])
 ax2 = ax1.twinx()
 ax2.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[0][0], 'r-')
@@ -1607,9 +1610,12 @@ temporal_field1 = cs.spectral_to_temporal(np.sqrt(cs.spectral_combos[0][1])*np.e
 temporal_intensity1 = np.abs(temporal_field1)**2
 ax3.plot(cs.t, temporal_intensity1/np.amax(temporal_intensity1), 'b:')
 # ax3.set_xlabel('Time (fs)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax3.yaxis.set_ticklabels([])
 ax3.xaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field1))
@@ -1632,9 +1638,12 @@ ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[1][1]/np.amax(cs.spectral_
 ax1.plot([ROI_line1[1], ROI_line1[1]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 ax1.plot([ROI_line2[1], ROI_line2[1]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 # ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax1.yaxis.set_ticklabels([])
 ax1.xaxis.set_ticklabels([])
 ax2 = ax1.twinx()
 ax2.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[1][0], 'r-')
@@ -1650,9 +1659,12 @@ temporal_field2 = cs.spectral_to_temporal(np.sqrt(cs.spectral_combos[1][1])*np.e
 temporal_intensity2 = np.abs(temporal_field2)**2
 ax3.plot(cs.t, temporal_intensity2/np.amax(temporal_intensity2), 'b:')
 # ax3.set_xlabel('Time (fs)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax3.yaxis.set_ticklabels([])
 ax3.xaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field2))
@@ -1674,9 +1686,12 @@ ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[2][1]/np.amax(cs.spectral_
 ax1.plot([ROI_line1[2], ROI_line1[2]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 ax1.plot([ROI_line2[2], ROI_line2[2]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 # ax1.set_xlabel('Frequency (THz)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax1.yaxis.set_ticklabels([])
 ax1.xaxis.set_ticklabels([])
 ax2 = ax1.twinx()
 ax2.plot(trunc_function(cs.c/(cs.f+cs.central_f)), cs.spectral_combos[2][0], 'r-')
@@ -1692,9 +1707,12 @@ temporal_field3 = cs.spectral_to_temporal(np.sqrt(cs.spectral_combos[2][1])*np.e
 temporal_intensity3 = np.abs(temporal_field3)**2
 ax3.plot(cs.t, temporal_intensity3/np.amax(temporal_intensity3), 'b:')
 # ax3.set_xlabel('Time (fs)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax3.yaxis.set_ticklabels([])
 ax3.xaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field3))
@@ -1716,9 +1734,12 @@ ax1.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[3][1]/np.amax(cs.spectral_
 ax1.plot([ROI_line1[3], ROI_line1[3]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 ax1.plot([ROI_line2[3], ROI_line2[3]], [-1, 2], vertical_line_spec, linewidth=vertical_line_width)
 ax1.set_xlabel('Wavelength (nm)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax1.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax1.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax1.yaxis.set_ticklabels([])
 ax2 = ax1.twinx()
 ax2.plot(cs.c/(cs.f+cs.central_f), cs.spectral_combos[3][0], 'r-')
 ax2.set_xlim(510, 820) # in nm
@@ -1733,9 +1754,12 @@ temporal_field4 = cs.spectral_to_temporal(np.sqrt(cs.spectral_combos[3][1])*np.e
 temporal_intensity4 = np.abs(temporal_field4)**2
 ax3.plot(cs.t, temporal_intensity4/np.amax(temporal_intensity4), 'b:')
 ax3.set_xlabel('Time (fs)', fontsize=my_font_size)
+# hide the y-axis ticks 
+plt.yticks([-1.0, 2.0])
 ax3.set_ylabel('Intensity (a.u.)', fontsize=my_font_size)
 ax3.set_ylim(0.0, 1.15)
-plt.yticks([0.0, 1.0])
+# skip the y-axis labels
+ax3.yaxis.set_ticklabels([])
 ax4 = ax3.twinx()
 temporal_phase = np.unwrap(np.angle(temporal_field4))
 temporal_phase[:] -= temporal_phase[np.argmin(np.abs(cs.t-0.0))]
@@ -1750,7 +1774,7 @@ plt.text(x=0.04, y=0.9, s='case 4', horizontalalignment='left', verticalalignmen
 ##################################################################
 ##################################################################
 # save the plot
-fig.tight_layout(pad=0.2)
+fig.tight_layout(pad=0.2, w_pad=1.0)
 fig.savefig('PulseCharacteristics.pdf', dpi=600)
 
     
